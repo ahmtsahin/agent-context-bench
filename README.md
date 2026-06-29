@@ -185,6 +185,10 @@ agent-context-bench dashboard reports --output dashboard.html
 
 The dashboard includes overview metrics, per-skill rows, top issues, and an `AGENTS.md` preview.
 
+<p align="center">
+  <img src="./docs/dashboard-screenshot.png" alt="Agent Context Bench Dashboard" width="800">
+</p>
+
 Generate starter benchmark tasks from git history:
 
 ```bash
