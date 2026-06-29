@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows
 semantic versioning.
 
+## [0.4.0]
+
+### Added
+- Broken-reference detection: inline-code and markdown-link paths with a known
+  code/config extension that do not resolve against the repo (or the context
+  file's own directory) are flagged, with placeholders, URLs, scoped packages,
+  MIME types, and RPC method names filtered out.
+- Empty-skill detection: a `SKILL.md` with frontmatter but no body is flagged.
+- More conflict pairs: code comments, formatting/formatter, and comment/doc
+  language, each designed so a single negated sentence cannot self-trigger.
+
 ## [0.3.0]
 
 ### Added

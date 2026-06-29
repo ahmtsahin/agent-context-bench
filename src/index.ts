@@ -250,8 +250,42 @@ const CONFLICT_CHECKS = [
     positive: /\b(?:regenerate|update|modify|edit)\b.{0,35}\b(?:generated|vendor|dist)\b/i,
     negative: /\b(?:never|do not|don't|avoid)\b.{0,35}\b(?:modify|edit|touch)\b.{0,35}\b(?:generated|vendor|dist)\b/i,
     suggestion: "Name the generated directories and the exact command that regenerates them."
+  },
+  {
+    id: "conflict-comments",
+    title: "Conflicting code-comment instructions",
+    // Positive requires an affirmative directive so a lone negative sentence cannot match both sides.
+    positive: /\b(?:always|must|make sure to|prefer to)\b.{0,30}\b(?:add|write|include|document)\b.{0,20}\bcomments?\b/i,
+    negative: /\b(?:no|never|avoid|do not|don't|without|minimi[sz]e)\b.{0,20}\bcomments?\b/i,
+    suggestion: "State one comment policy: when comments are required and when code should stay self-documenting."
+  },
+  {
+    id: "conflict-formatting",
+    title: "Conflicting formatting instructions",
+    positive: /\b(?:always|must|run)\b.{0,25}\b(?:prettier|formatter|gofmt|black|rustfmt|auto-?format)\b/i,
+    negative: /\b(?:do not|don't|never|avoid)\b.{0,25}\b(?:reformat|auto-?format|run (?:prettier|the formatter)|format)\b/i,
+    suggestion: "Say exactly which formatter to run and which files or directories to leave untouched."
+  },
+  {
+    id: "conflict-comment-language",
+    title: "Conflicting language instructions",
+    positive: /\b(?:write|use)\b.{0,20}\b(?:english)\b.{0,20}\b(?:comments?|docs?|messages?)\b/i,
+    negative: /\b(?:write|use)\b.{0,20}\b(?:turkish|german|french|spanish|chinese|japanese)\b.{0,20}\b(?:comments?|docs?|messages?)\b/i,
+    suggestion: "Pick one language for comments, docs, and commit messages and state it once."
   }
 ];
+
+const PATH_EXTENSIONS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "md", "mdx", "py", "go", "rs", "java", "kt", "rb", "php",
+  "yml", "yaml", "toml", "ini", "cfg", "sh", "bash", "ps1", "sql", "css", "scss", "less", "html", "vue",
+  "svelte", "c", "h", "cpp", "cs", "swift", "lock", "env", "xml", "gradle", "proto", "tf"
+]);
+
+const KNOWN_ROOT_FILES = new Set([
+  "Makefile", "Dockerfile", "Procfile", "Gemfile", "Rakefile", "Justfile", "Brewfile"
+]);
+
+const REFERENCE_PLACEHOLDER = /(?:^|\/)(?:path\/to|to\/your|your-|example|placeholder|foo|bar|baz)(?:\/|\.|$)/i;
 
 export function analyzeRepo(rootInput = ".", options: AnalyzeOptions = {}): AnalysisResult {
   const root = path.resolve(rootInput);
@@ -281,6 +315,7 @@ export function analyzeRepo(rootInput = ".", options: AnalyzeOptions = {}): Anal
   detectDuplicateRules(files, issues);
   detectRepoMismatches(files, repo, issues);
   detectMissingSpecificCommands(files, repo, issues);
+  detectMissingReferences(files, root, issues);
 
   const totals = sumFileTotals(files);
   const sortedIssues = sortIssues(issues);
@@ -753,6 +788,21 @@ function detectSkillFrontmatterIssues(file: ContextFile, issues: Issue[]) {
       impact: 4
     });
   }
+
+  const body = file.content.replace(/^---\n[\s\S]*?\n---/, "").trim();
+  if (body.length === 0) {
+    issues.push({
+      id: "skill-empty-body",
+      title: "Skill has no body",
+      severity: "warn",
+      category: "skill-metadata",
+      file: file.relativePath,
+      line: 1,
+      message: "The skill has frontmatter but no instructions after it, so selecting it gives the agent nothing to act on.",
+      suggestion: "Add the steps the skill should run, or remove the skill if it is a placeholder.",
+      impact: 8
+    });
+  }
 }
 
 function parseFrontmatter(content: string): { values: Record<string, string>; line: number } | undefined {
@@ -940,6 +990,108 @@ function detectMissingSpecificCommands(files: ContextFile[], repo: RepoSignals, 
     suggestion: `Add a short testing section with ${code(repo.commands.test)} and when to run it.`,
     impact: 7
   });
+}
+
+// Flag inline-code/markdown-link references to repo files that do not exist, so
+// agents are not sent chasing paths that were renamed or never existed.
+function detectMissingReferences(files: ContextFile[], root: string, issues: Issue[]) {
+  for (const file of files) {
+    const fileDir = path.dirname(file.absolutePath);
+    const lines = file.content.split("\n");
+    const reported = new Set<string>();
+    let count = 0;
+    for (let index = 0; index < lines.length && count < 12; index += 1) {
+      for (const raw of extractReferenceCandidates(lines[index])) {
+        const reference = normalizeReference(raw);
+        if (!reference || reported.has(reference) || !isPathLikeReference(reference)) {
+          continue;
+        }
+        if (referenceExists(root, fileDir, reference)) {
+          continue;
+        }
+        reported.add(reference);
+        count += 1;
+        issues.push({
+          id: "missing-reference",
+          title: "Reference to a missing path",
+          severity: "warn",
+          category: "references",
+          file: file.relativePath,
+          line: index + 1,
+          message: `References \`${truncate(reference, 80)}\`, which does not exist in the repository.`,
+          suggestion: "Fix or remove the path; agents waste turns opening files that are not there.",
+          impact: 5
+        });
+        if (count >= 12) {
+          break;
+        }
+      }
+    }
+  }
+}
+
+function extractReferenceCandidates(line: string): string[] {
+  const candidates: string[] = [];
+  for (const match of line.matchAll(/`([^`]+)`/g)) {
+    candidates.push(match[1]);
+  }
+  for (const match of line.matchAll(/\]\(([^)\s]+)\)/g)) {
+    candidates.push(match[1]);
+  }
+  return candidates;
+}
+
+function normalizeReference(raw: string): string | undefined {
+  let reference = raw.trim();
+  if (!reference || /\s/.test(reference)) {
+    return undefined;
+  }
+  // Reject globs, placeholders ([name]), MIME types, scoped npm packages, and the like.
+  if (/[*?{}|<>$\\`"'@;=\[\]]/.test(reference)) {
+    return undefined;
+  }
+  if (/^(?:https?:|mailto:|tel:|ftp:|#|~|\/|@)/i.test(reference)) {
+    return undefined;
+  }
+  reference = reference
+    .replace(/^\.\//, "")
+    .replace(/#.*$/, "")
+    .replace(/:\d+(?::\d+)?$/, "")
+    .replace(/[)\].,:;!?]+$/, "")
+    .replace(/\/+$/, "");
+  return reference || undefined;
+}
+
+function isPathLikeReference(reference: string): boolean {
+  if (REFERENCE_PLACEHOLDER.test(reference)) {
+    return false;
+  }
+  // High-signal root files (Makefile, Dockerfile, ...) are worth checking even without a slash.
+  if (KNOWN_ROOT_FILES.has(reference)) {
+    return true;
+  }
+  // Require a directory separator: bare filenames like `access.json` are too often
+  // files the doc tells the agent to create, not files that must already exist.
+  if (!reference.includes("/")) {
+    return false;
+  }
+  // Require a known code/config extension. Extensionless refs like `roots/list` or
+  // `plugin/agents` are usually RPC method names or structural placeholders, not files.
+  const extension = path.extname(reference).slice(1).toLowerCase();
+  return PATH_EXTENSIONS.has(extension);
+}
+
+function referenceExists(root: string, fileDir: string, reference: string): boolean {
+  return safeExists(path.resolve(root, reference)) || safeExists(path.resolve(fileDir, reference));
+}
+
+function safeExists(value: string): boolean {
+  try {
+    fs.statSync(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function contextScore(issues: Issue[]): number {

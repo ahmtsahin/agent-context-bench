@@ -328,6 +328,58 @@ test("applies thresholds and ignore dirs from a config file", () => {
   assert.ok(parsed.issues.some((issue) => issue.id === "context-bloat"));
 });
 
+test("detects additional conflict pairs (comments)", () => {
+  const root = tempRepo();
+  fs.writeFileSync(
+    path.join(root, "AGENTS.md"),
+    "- Always add comments to every exported function.\n- Never add comments; keep code self-documenting.\n"
+  );
+
+  const result = analyzeRepo(root);
+  assert.ok(issueIds(result).includes("conflict-comments"));
+});
+
+test("flags references to files that do not exist", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "real.ts"), "export const x = 1;\n");
+  fs.writeFileSync(
+    path.join(root, "AGENTS.md"),
+    "- Start from `src/real.ts` and the helper in `src/missing.ts`.\n- Config lives in `config/app.yaml`.\n"
+  );
+
+  const result = analyzeRepo(root);
+  const missing = result.issues.filter((issue) => issue.id === "missing-reference");
+  const messages = missing.map((issue) => issue.message).join("\n");
+
+  assert.match(messages, /src\/missing\.ts/);
+  assert.match(messages, /config\/app\.yaml/);
+  assert.ok(!messages.includes("src/real.ts"));
+});
+
+test("does not flag commands or bare directories as missing references", () => {
+  const root = tempRepo();
+  fs.writeFileSync(
+    path.join(root, "AGENTS.md"),
+    "- Run `npm test` and `npm run build`.\n- Prefer `src/` for implementation changes.\n- See `path/to/example.ts` for the shape.\n"
+  );
+
+  const result = analyzeRepo(root);
+  assert.ok(!issueIds(result).includes("missing-reference"));
+});
+
+test("flags a skill with frontmatter but no body", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "stub"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "skills", "stub", "SKILL.md"),
+    ["---", "name: stub", "description: Use this when you need to do the stubbed thing in this repository.", "---", ""].join("\n")
+  );
+
+  const result = analyzeRepo(root);
+  assert.ok(issueIds(result).includes("skill-empty-body"));
+});
+
 test("runs an A/B bench and measures success per context condition", () => {
   const root = tempRepo();
   const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });

@@ -68,9 +68,10 @@ Run with --write-optimized to generate it.
 ## What It Checks
 
 - Context bloat: long root instructions, skill instructions, large token footprint, dense lines.
-- Conflicting instructions: for example "run all tests" and "avoid full test suites". Conflicts are scope-aware — two skills that never load together, or two unrelated nested `AGENTS.md` files, are not falsely flagged.
+- Conflicting instructions across tests, commits, network access, autonomy, generated files, comments, formatting, and comment/doc language — for example "run all tests" and "avoid full test suites". Conflicts are scope-aware: two skills that never load together, or two unrelated nested `AGENTS.md` files, are not falsely flagged.
 - Duplicate rules across `AGENTS.md`, `CLAUDE.md`, Cursor rules, and Copilot instructions, naming the files involved.
-- Skill metadata quality: missing frontmatter, missing or too-thin/too-long `description`, and `name` that does not match the skill folder. Skill descriptions are what drive selection, so weak ones hurt and bloated ones add constant token cost.
+- Broken references: inline-code or markdown-link paths with a code/config extension (for example `src/foo.ts`, `config/app.yaml`) that do not exist in the repo, so agents are not sent chasing files that were renamed or never existed.
+- Skill metadata quality: missing frontmatter, missing/too-thin/too-long `description`, `name` that does not match the skill folder, and skills that have frontmatter but no body. Skill descriptions are what drive selection, so weak ones hurt and bloated ones add constant token cost.
 - Ambiguous test guidance that mentions tests without concrete commands.
 - Dangerous instructions such as `rm -rf`, `chmod 777`, `curl | bash`, or concrete secret-file reads (for example `cat .env`).
 - Package-manager mismatches such as `pnpm` instructions in an `npm` repo.
