@@ -1,0 +1,39 @@
+name: Agent Context Bench
+description: Measure whether AI coding agent context files help or hurt a repo.
+author: ahmtsahin
+branding:
+  icon: activity
+  color: blue
+inputs:
+  path:
+    description: Repository path to analyze.
+    required: false
+    default: "."
+  fail-under:
+    description: Fail the workflow when the score is lower than this number. Use 0 to never fail.
+    required: false
+    default: "0"
+  write-optimized:
+    description: Write AGENTS.optimized.md during the action run.
+    required: false
+    default: "false"
+outputs:
+  report-file:
+    description: Markdown report path.
+    value: ${{ steps.run.outputs.report-file }}
+runs:
+  using: composite
+  steps:
+    - name: Run agent context bench
+      id: run
+      shell: bash
+      run: |
+        set -euo pipefail
+        report_file="agent-context-bench-report.md"
+        args=("${{ inputs.path }}" "--format" "markdown" "--fail-under" "${{ inputs.fail-under }}")
+        if [ "${{ inputs.write-optimized }}" = "true" ]; then
+          args+=("--write-optimized")
+        fi
+        node "$GITHUB_ACTION_PATH/dist/cli.js" "${args[@]}" | tee "$report_file"
+        cat "$report_file" >> "$GITHUB_STEP_SUMMARY"
+        echo "report-file=$report_file" >> "$GITHUB_OUTPUT"

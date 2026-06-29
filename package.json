@@ -1,0 +1,58 @@
+{
+  "name": "agent-context-bench",
+  "version": "0.1.0",
+  "description": "Measure whether AGENTS.md, CLAUDE.md, Cursor rules, and Copilot instructions help or hurt AI coding agents.",
+  "type": "module",
+  "author": "ahmtsahin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmtsahin/agent-context-bench.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ahmtsahin/agent-context-bench/issues"
+  },
+  "homepage": "https://github.com/ahmtsahin/agent-context-bench#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-context-bench": "./dist/cli.js",
+    "context-diet": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "action.yml"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "check": "npm run build && npm test",
+    "smoke": "node dist/cli.js --help"
+  },
+  "keywords": [
+    "agents-md",
+    "claude-code",
+    "codex",
+    "cursor",
+    "ai-coding-agents",
+    "context-engineering",
+    "benchmark"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
