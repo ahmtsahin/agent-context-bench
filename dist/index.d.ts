@@ -1,4 +1,6 @@
 export { renderDashboardReports } from "./dashboard.js";
+export * from "./bench.js";
+export * from "./history.js";
 export type Severity = "info" | "warn" | "error";
 export type ReportFormat = "text" | "json" | "markdown" | "dashboard";
 export type LoadScope = "always" | "deferred";
@@ -12,6 +14,8 @@ export interface AnalyzeOptions {
     maxLines?: number;
     maxBytes?: number;
     maxDepth?: number;
+    ignoreDirs?: string[];
+    tokenizer?: (text: string) => number;
 }
 export interface ContextFile {
     absolutePath: string;
@@ -131,6 +135,15 @@ export declare function inferRepoSignals(rootInput?: string): RepoSignals;
 export declare function generateOptimizedAgents(result: AnalysisResult): string;
 export declare function writeOptimizedAgents(result: AnalysisResult, outputPath?: string): string;
 export declare function renderReport(result: AnalysisResult, format?: ReportFormat, optimizedPath?: string): string;
+export interface BaselineSummary {
+    label?: string;
+    score: number;
+    inventoryRiskScore: number;
+    totals: {
+        tokenEstimate: number;
+    };
+}
+export declare function renderBaselineComparison(current: AnalysisResult, baseline: BaselineSummary, format?: ReportFormat): string;
 export declare function generateBenchFromGitHistory(rootInput?: string, options?: {
     limit?: number;
     scanCommits?: number;

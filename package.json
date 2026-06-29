@@ -1,6 +1,6 @@
 {
   "name": "agent-context-bench",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Measure whether AGENTS.md, CLAUDE.md, Cursor rules, and Copilot instructions help or hurt AI coding agents.",
   "type": "module",
   "author": "ahmtsahin",
@@ -36,7 +36,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.mjs",
     "check": "npm run build && npm test",
-    "smoke": "node dist/cli.js --help"
+    "smoke": "node dist/cli.js --help",
+    "prepublishOnly": "npm run check"
   },
   "keywords": [
     "agents-md",
@@ -51,6 +52,9 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
+  },
+  "optionalDependencies": {
+    "gpt-tokenizer": "^2.9.0"
   },
   "engines": {
     "node": ">=20"

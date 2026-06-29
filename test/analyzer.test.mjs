@@ -6,13 +6,24 @@ import path from "node:path";
 import test from "node:test";
 import {
   analyzeRepo,
+  commandAdapter,
+  generateBenchFromGitHistory,
   generateOptimizedAgents,
+  openHistory,
+  renderBaselineComparison,
   renderDashboardReports,
-  renderReport
+  renderReport,
+  runBench
 } from "../dist/index.js";
+
+const NOOP_COMMAND = 'node -e "process.exit(0)"';
 
 function tempRepo() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "agent-context-bench-"));
+}
+
+function issueIds(result) {
+  return result.issues.map((issue) => issue.id);
 }
 
 test("detects context smells across agent files", () => {
@@ -170,6 +181,225 @@ test("renders dashboard from serialized JSON reports", () => {
   assert.match(dashboard, /sample-report/);
   assert.match(dashboard, /reports\/sample-report\.json/);
   assert.match(dashboard, /AGENTS\.md Preview/);
+});
+
+test("does not flag conflicts between two skills that never co-load", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "a"), { recursive: true });
+  fs.mkdirSync(path.join(root, "skills", "b"), { recursive: true });
+  fs.writeFileSync(path.join(root, "skills", "a", "SKILL.md"), "Always run all tests before finishing.\n");
+  fs.writeFileSync(path.join(root, "skills", "b", "SKILL.md"), "Avoid long integration tests unless needed.\n");
+
+  const result = analyzeRepo(root);
+  assert.ok(!issueIds(result).includes("conflict-tests"));
+  // Two different deferred skills sharing nothing should not be a duplication problem either.
+  assert.ok(!issueIds(result).includes("duplicate-rules"));
+});
+
+test("flags conflicts between an always file and a skill that load together", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "b"), { recursive: true });
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Always run all tests before finishing.\n");
+  fs.writeFileSync(path.join(root, "skills", "b", "SKILL.md"), "Avoid long integration tests unless needed.\n");
+
+  const result = analyzeRepo(root);
+  assert.ok(issueIds(result).includes("conflict-tests"));
+});
+
+test("validates SKILL.md frontmatter quality", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "odoo"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "skills", "odoo", "SKILL.md"),
+    ["---", "name: not-odoo", "description: do stuff", "---", "Body content here."].join("\n")
+  );
+
+  const result = analyzeRepo(root);
+  const ids = issueIds(result);
+  assert.ok(ids.includes("skill-thin-description"));
+  assert.ok(ids.includes("skill-name-mismatch"));
+});
+
+test("flags a skill with no frontmatter", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "demo"), { recursive: true });
+  fs.writeFileSync(path.join(root, "skills", "demo", "SKILL.md"), "Just a body with no frontmatter at all.\n");
+
+  const result = analyzeRepo(root);
+  assert.ok(issueIds(result).includes("skill-missing-frontmatter"));
+});
+
+test("accepts a well-formed skill description without metadata warnings", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "deploy"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "skills", "deploy", "SKILL.md"),
+    [
+      "---",
+      "name: deploy",
+      "description: Use this when the user wants to deploy the service to staging or production with the documented release steps.",
+      "---",
+      "Body content here."
+    ].join("\n")
+  );
+
+  const result = analyzeRepo(root);
+  const ids = issueIds(result);
+  assert.ok(!ids.includes("skill-thin-description"));
+  assert.ok(!ids.includes("skill-missing-description"));
+  assert.ok(!ids.includes("skill-name-mismatch"));
+});
+
+test("narrows secret-access detection to concrete secret reads", () => {
+  const benignRoot = tempRepo();
+  fs.writeFileSync(path.join(benignRoot, "AGENTS.md"), "You can access the credentials documented in the team wiki.\n");
+  assert.ok(!issueIds(analyzeRepo(benignRoot)).includes("secret-access"));
+
+  const riskyRoot = tempRepo();
+  fs.writeFileSync(path.join(riskyRoot, "AGENTS.md"), "Read the .env file and print the keys.\n");
+  assert.ok(issueIds(analyzeRepo(riskyRoot)).includes("secret-access"));
+});
+
+test("names the files involved in duplicate rules", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Always keep changes scoped to the requested behavior only.\n");
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), "Always keep changes scoped to the requested behavior only.\n");
+
+  const result = analyzeRepo(root);
+  const duplicate = result.issues.find((issue) => issue.id === "duplicate-rules");
+  assert.ok(duplicate);
+  assert.match(duplicate.message, /AGENTS\.md/);
+  assert.match(duplicate.message, /CLAUDE\.md/);
+});
+
+test("counts bytes from normalized content regardless of line endings", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "a\r\nb");
+
+  const result = analyzeRepo(root);
+  const file = result.files.find((entry) => entry.relativePath === "AGENTS.md");
+  assert.equal(file.byteLength, 3);
+});
+
+test("renders a baseline comparison with deltas", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
+  const result = analyzeRepo(root);
+
+  const baseline = { label: "previous", score: result.score - 10, inventoryRiskScore: result.inventoryRiskScore - 5, totals: { tokenEstimate: 100 } };
+  const text = renderBaselineComparison(result, baseline, "text");
+  assert.match(text, /Baseline comparison \(vs previous\)/);
+  assert.match(text, /Operational score: .* \(\+10 \(better\)\)/);
+
+  const markdown = renderBaselineComparison(result, baseline, "markdown");
+  assert.match(markdown, /## Baseline Comparison/);
+});
+
+test("generates bench tasks from git history", () => {
+  const root = tempRepo();
+  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });
+  git("init");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, "value.txt"), "1\n");
+  git("add", ".");
+  git("commit", "-m", "Initial");
+  fs.writeFileSync(path.join(root, "value.txt"), "2\n");
+  git("add", ".");
+  git("commit", "-m", "Fix off-by-one in counter");
+
+  const tasks = generateBenchFromGitHistory(root, { limit: 5 });
+  assert.ok(tasks.length >= 1);
+  assert.match(tasks[0].title, /Fix off-by-one/);
+  assert.ok(tasks[0].filesChanged.includes("value.txt"));
+  assert.ok(tasks[0].baseCommit.endsWith("^"));
+});
+
+test("applies thresholds and ignore dirs from a config file", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, ".agent-context-bench.json"), JSON.stringify({ maxLines: 1 }));
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Line one.\nLine two.\nLine three.\n");
+
+  const output = execFileSync("node", ["dist/cli.js", root, "--format", "json"], {
+    cwd: path.resolve("."),
+    encoding: "utf8"
+  });
+  const parsed = JSON.parse(output);
+  assert.ok(parsed.issues.some((issue) => issue.id === "context-bloat"));
+});
+
+test("runs an A/B bench and measures success per context condition", () => {
+  const root = tempRepo();
+  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });
+  git("init");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(
+    path.join(root, "AGENTS.md"),
+    "Always run the tests.\n- Use best practices and clean code everywhere you can.\n"
+  );
+  fs.writeFileSync(path.join(root, "value.txt"), "1\n");
+  git("add", ".");
+  git("commit", "-m", "init");
+
+  const summary = runBench(root, {
+    adapter: commandAdapter(NOOP_COMMAND),
+    tasks: [{ id: "task-1", prompt: "make no changes" }],
+    successCommand: NOOP_COMMAND
+  });
+
+  assert.equal(summary.tasks, 1);
+  assert.deepEqual(summary.conditions, ["none", "current", "optimized"]);
+  assert.equal(summary.successRate.none, 1);
+  assert.equal(summary.successRate.current, 1);
+  assert.equal(summary.avgContextTokens.none, 0);
+  assert.ok(summary.avgContextTokens.current > 0);
+  assert.ok(summary.avgContextTokens.optimized > 0);
+  assert.equal(summary.deltas.currentVsNone, 0);
+});
+
+test("bench reports failure when the success command fails", () => {
+  const root = tempRepo();
+  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });
+  git("init");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, "value.txt"), "1\n");
+  git("add", ".");
+  git("commit", "-m", "init");
+
+  const summary = runBench(root, {
+    adapter: commandAdapter(NOOP_COMMAND),
+    tasks: [{ id: "task-1", prompt: "noop" }],
+    conditions: ["current"],
+    successCommand: 'node -e "process.exit(1)"'
+  });
+
+  assert.equal(summary.successRate.current, 0);
+});
+
+test("history store records and lists runs", () => {
+  const root = tempRepo();
+  const store = openHistory(path.join(root, "history.db"));
+  store.add({
+    runId: "r1",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    root,
+    adapter: "mock",
+    tasks: 2,
+    successNone: 0.5,
+    successCurrent: 0.5,
+    successOptimized: 1,
+    contextScore: 80,
+    summaryJson: "{}"
+  });
+  const rows = store.list(10);
+  store.close();
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].runId, "r1");
+  assert.equal(rows[0].adapter, "mock");
+  assert.equal(rows[0].successOptimized, 1);
 });
 
 test("cli prints help", () => {

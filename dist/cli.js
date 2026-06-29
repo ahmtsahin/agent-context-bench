@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeRepo, generateBenchFromGitHistory, renderDashboardReports, renderReport, writeOptimizedAgents } from "./index.js";
+import { analyzeRepo, commandAdapter, generateBenchFromGitHistory, openHistory, renderBaselineComparison, renderDashboardReports, renderReport, runBench, writeOptimizedAgents } from "./index.js";
 export function main(argv = process.argv.slice(2)) {
     if (argv.includes("--help") || argv.includes("-h")) {
         console.log(helpText());
         return 0;
     }
     if (argv.includes("--version") || argv.includes("-v")) {
-        console.log("0.1.0");
+        console.log(packageVersion());
         return 0;
     }
     const args = parseArgs(argv);
@@ -39,27 +40,241 @@ export function main(argv = process.argv.slice(2)) {
         }
         return 0;
     }
+    if (args.command === "run-bench") {
+        return runBenchCommand(root, args);
+    }
+    if (args.command === "history") {
+        return historyCommand(root, args);
+    }
+    const config = loadConfig(root);
+    const format = args.format ?? config.format ?? "text";
+    const failUnder = args.failUnder ?? config.failUnder;
     const result = analyzeRepo(root, {
-        maxLines: args.maxLines,
-        maxBytes: args.maxBytes,
-        maxDepth: args.maxDepth
+        maxLines: args.maxLines ?? config.maxLines,
+        maxBytes: args.maxBytes ?? config.maxBytes,
+        maxDepth: args.maxDepth ?? config.maxDepth,
+        ignoreDirs: config.ignoreDirs,
+        tokenizer: args.exactTokens ? buildExactTokenizer() : undefined
     });
     let optimizedPath;
     if (args.writeOptimized) {
         const output = args.writeOptimized === true ? undefined : args.writeOptimized;
         optimizedPath = writeOptimizedAgents(result, output);
     }
-    const report = renderReport(result, args.format, optimizedPath);
+    let report = renderReport(result, format, optimizedPath);
+    if (args.baseline) {
+        const baseline = loadBaseline(args.baseline);
+        if (format === "text" || format === "markdown") {
+            report = `${report}\n${renderBaselineComparison(result, baseline, format)}`;
+        }
+        else {
+            console.error("note: --baseline comparison is only rendered for text and markdown formats.");
+        }
+    }
     if (args.output) {
         writeFile(root, args.output, report);
     }
     else {
         console.log(report);
     }
-    if (typeof args.failUnder === "number" && result.score < args.failUnder) {
+    if (typeof failUnder === "number" && result.score < failUnder) {
         return 1;
     }
     return 0;
+}
+function runBenchCommand(root, args) {
+    if (!args.agent) {
+        throw new Error("run-bench requires --agent <command> (the agent CLI to invoke per task).");
+    }
+    const tasks = loadBenchTasks(root, args);
+    if (tasks.length === 0) {
+        console.error("No bench tasks found. Pass --tasks <file.json> or run in a git repo with task-like commits.");
+        return 2;
+    }
+    const summary = runBench(root, {
+        adapter: commandAdapter(args.agent),
+        tasks,
+        conditions: args.conditions,
+        successCommand: args.success,
+        timeoutMs: args.timeout,
+        onProgress: (message) => console.error(message)
+    });
+    if (!args.noHistory) {
+        recordHistory(root, args, summary);
+    }
+    if (args.output) {
+        writeFile(root, args.output, JSON.stringify(summary, null, 2));
+    }
+    console.log(renderBenchSummary(summary));
+    return 0;
+}
+function historyCommand(root, args) {
+    const store = openHistory(historyFilePath(root, args));
+    try {
+        const rows = store.list(args.limit ?? 20);
+        if (args.format === "json") {
+            console.log(JSON.stringify(rows, null, 2));
+        }
+        else {
+            console.log(renderHistory(rows, store.backend));
+        }
+    }
+    finally {
+        store.close();
+    }
+    return 0;
+}
+function loadBenchTasks(root, args) {
+    if (args.tasks) {
+        const stat = safeStat(args.tasks);
+        if (!stat?.isFile()) {
+            throw new Error(`Tasks file not found: ${args.tasks}`);
+        }
+        const parsed = JSON.parse(fs.readFileSync(args.tasks, "utf8"));
+        const list = Array.isArray(parsed)
+            ? parsed
+            : parsed.tasks ?? [];
+        return list.map((task) => task).filter((task) => task && task.id && task.prompt);
+    }
+    return generateBenchFromGitHistory(root, { limit: args.limit ?? 5 });
+}
+function recordHistory(root, args, summary) {
+    const store = openHistory(historyFilePath(root, args));
+    try {
+        store.add({
+            runId: `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            timestamp: new Date().toISOString(),
+            root,
+            adapter: summary.adapter,
+            tasks: summary.tasks,
+            successNone: summary.successRate.none ?? null,
+            successCurrent: summary.successRate.current ?? null,
+            successOptimized: summary.successRate.optimized ?? null,
+            contextScore: analyzeRepo(root).score,
+            summaryJson: JSON.stringify(summary)
+        });
+    }
+    finally {
+        store.close();
+    }
+}
+function historyFilePath(root, args) {
+    if (args.historyFile) {
+        return path.isAbsolute(args.historyFile) ? args.historyFile : path.join(root, args.historyFile);
+    }
+    return path.join(root, ".agent-context-bench", "history.db");
+}
+function renderBenchSummary(summary) {
+    const lines = [];
+    lines.push(`Bench summary (adapter: ${summary.adapter})`);
+    lines.push(`- Tasks: ${summary.tasks}`);
+    for (const condition of summary.conditions) {
+        const rate = Math.round((summary.successRate[condition] ?? 0) * 100);
+        lines.push(`- ${condition}: ${rate}% success, ~${summary.avgContextTokens[condition] ?? 0} context tokens`);
+    }
+    lines.push("Measured deltas (success-rate points):");
+    lines.push(`- current vs none: ${formatDelta(summary.deltas.currentVsNone)}`);
+    lines.push(`- optimized vs current: ${formatDelta(summary.deltas.optimizedVsCurrent)}`);
+    lines.push(`- optimized vs none: ${formatDelta(summary.deltas.optimizedVsNone)}`);
+    return lines.join("\n");
+}
+function renderHistory(rows, backend) {
+    if (rows.length === 0) {
+        return `No bench runs recorded yet (${backend} store).`;
+    }
+    const lines = [`Bench run history (${backend} store, ${rows.length} shown):`];
+    for (const row of rows) {
+        const parts = [
+            row.timestamp,
+            `adapter=${row.adapter}`,
+            `tasks=${row.tasks}`,
+            `none=${formatRate(row.successNone)}`,
+            `current=${formatRate(row.successCurrent)}`,
+            `optimized=${formatRate(row.successOptimized)}`,
+            `score=${row.contextScore ?? "-"}`
+        ];
+        lines.push(`- ${parts.join(" | ")}`);
+    }
+    return lines.join("\n");
+}
+function formatDelta(value) {
+    if (value === null) {
+        return "n/a";
+    }
+    return value > 0 ? `+${value}` : String(value);
+}
+function formatRate(value) {
+    return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`;
+}
+function parseConditions(value) {
+    const allowed = ["none", "current", "optimized"];
+    const conditions = value
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+    for (const condition of conditions) {
+        if (!allowed.includes(condition)) {
+            throw new Error(`Invalid --conditions value: ${condition} (use none, current, optimized)`);
+        }
+    }
+    return conditions;
+}
+function loadConfig(root) {
+    const configPath = path.join(root, ".agent-context-bench.json");
+    if (!safeStat(configPath)?.isFile()) {
+        return {};
+    }
+    try {
+        const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+        if (parsed.format) {
+            parsed.format = parseFormat(parsed.format);
+        }
+        return parsed;
+    }
+    catch (error) {
+        throw new Error(`Invalid .agent-context-bench.json: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+function loadBaseline(file) {
+    const stat = safeStat(file);
+    if (!stat?.isFile()) {
+        throw new Error(`Baseline report not found: ${file}`);
+    }
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (typeof parsed.score !== "number" || typeof parsed.inventoryRiskScore !== "number" || !parsed.totals) {
+        throw new Error(`${file} is not an agent-context-bench JSON report.`);
+    }
+    return {
+        label: path.basename(file, ".json"),
+        score: parsed.score,
+        inventoryRiskScore: parsed.inventoryRiskScore,
+        totals: { tokenEstimate: parsed.totals.tokenEstimate }
+    };
+}
+function packageVersion() {
+    try {
+        const require = createRequire(import.meta.url);
+        const pkg = require("../package.json");
+        return pkg.version ?? "0.0.0";
+    }
+    catch {
+        return "0.0.0";
+    }
+}
+function buildExactTokenizer() {
+    try {
+        const require = createRequire(import.meta.url);
+        const mod = require("gpt-tokenizer");
+        const encode = mod.encode ?? mod.default?.encode;
+        if (typeof encode === "function") {
+            return (text) => encode(text).length;
+        }
+    }
+    catch {
+        // gpt-tokenizer is an optional dependency; fall through to the warning below.
+    }
+    console.error("warning: --exact-tokens needs the optional 'gpt-tokenizer' package; using the heuristic estimate instead.");
+    return undefined;
 }
 function parseArgs(argv) {
     const args = [...argv];
@@ -72,10 +287,17 @@ function parseArgs(argv) {
         args.shift();
         command = "dashboard";
     }
+    else if (args[0] === "run-bench") {
+        args.shift();
+        command = "run-bench";
+    }
+    else if (args[0] === "history") {
+        args.shift();
+        command = "history";
+    }
     const parsed = {
         command,
-        target: ".",
-        format: "text"
+        target: "."
     };
     for (let index = 0; index < args.length; index += 1) {
         const arg = args[index];
@@ -133,6 +355,54 @@ function parseArgs(argv) {
         }
         else if (arg.startsWith("--limit=")) {
             parsed.limit = parseNumber(arg.slice("--limit=".length), "--limit");
+        }
+        else if (arg === "--baseline") {
+            parsed.baseline = requireValue(args, ++index, arg);
+        }
+        else if (arg.startsWith("--baseline=")) {
+            parsed.baseline = arg.slice("--baseline=".length);
+        }
+        else if (arg === "--exact-tokens") {
+            parsed.exactTokens = true;
+        }
+        else if (arg === "--agent") {
+            parsed.agent = requireValue(args, ++index, arg);
+        }
+        else if (arg.startsWith("--agent=")) {
+            parsed.agent = arg.slice("--agent=".length);
+        }
+        else if (arg === "--tasks") {
+            parsed.tasks = requireValue(args, ++index, arg);
+        }
+        else if (arg.startsWith("--tasks=")) {
+            parsed.tasks = arg.slice("--tasks=".length);
+        }
+        else if (arg === "--success") {
+            parsed.success = requireValue(args, ++index, arg);
+        }
+        else if (arg.startsWith("--success=")) {
+            parsed.success = arg.slice("--success=".length);
+        }
+        else if (arg === "--conditions") {
+            parsed.conditions = parseConditions(requireValue(args, ++index, arg));
+        }
+        else if (arg.startsWith("--conditions=")) {
+            parsed.conditions = parseConditions(arg.slice("--conditions=".length));
+        }
+        else if (arg === "--timeout") {
+            parsed.timeout = parseNumber(requireValue(args, ++index, arg), arg);
+        }
+        else if (arg.startsWith("--timeout=")) {
+            parsed.timeout = parseNumber(arg.slice("--timeout=".length), "--timeout");
+        }
+        else if (arg === "--history-file") {
+            parsed.historyFile = requireValue(args, ++index, arg);
+        }
+        else if (arg.startsWith("--history-file=")) {
+            parsed.historyFile = arg.slice("--history-file=".length);
+        }
+        else if (arg === "--no-history") {
+            parsed.noHistory = true;
         }
         else if (arg === "--from-git-history") {
             // Accepted for readability: generate-bench already uses git history.
@@ -251,6 +521,8 @@ function helpText() {
         "  context-diet [path] [options]",
         "  agent-context-bench generate-bench [path] --from-git-history [options]",
         "  agent-context-bench dashboard [json-file-or-report-dir] -o dashboard.html",
+        "  agent-context-bench run-bench [path] --agent \"<cmd>\" [--tasks file.json] [--success \"<cmd>\"]",
+        "  agent-context-bench history [path] [--limit n] [--format json]",
         "",
         "Options:",
         "  --format text|json|markdown|dashboard  Report format (default: text)",
@@ -260,9 +532,21 @@ function helpText() {
         "  --max-lines <n>                  Context bloat line threshold (default: 350)",
         "  --max-bytes <n>                  Context bloat byte threshold (default: 14000)",
         "  --max-depth <n>                  Nested context file search depth (default: 6)",
-        "  --limit <n>                      Bench task limit for generate-bench",
+        "  --baseline <file.json>           Compare scores against a previous JSON report",
+        "  --exact-tokens                   Use the optional gpt-tokenizer for exact token counts",
+        "  --limit <n>                      Bench task limit for generate-bench/history",
+        "  --agent <cmd>                    run-bench: agent CLI to invoke per task",
+        "  --tasks <file.json>              run-bench: task list (default: from git history)",
+        "  --success <cmd>                  run-bench: success command (default: repo test script)",
+        "  --conditions <list>              run-bench: none,current,optimized (default: all)",
+        "  --timeout <ms>                   run-bench: per-step timeout",
+        "  --history-file <file>            run-bench/history: history store path",
+        "  --no-history                     run-bench: do not record the run",
         "  -h, --help                       Show help",
-        "  -v, --version                    Show version"
+        "  -v, --version                    Show version",
+        "",
+        "Config: place a .agent-context-bench.json in the target repo to set",
+        "maxLines, maxBytes, maxDepth, failUnder, format, or ignoreDirs defaults."
     ].join("\n");
 }
 try {

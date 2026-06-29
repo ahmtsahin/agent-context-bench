@@ -68,15 +68,17 @@ Run with --write-optimized to generate it.
 ## What It Checks
 
 - Context bloat: long root instructions, skill instructions, large token footprint, dense lines.
-- Conflicting instructions: for example "run all tests" and "avoid full test suites".
-- Duplicate rules across `AGENTS.md`, `CLAUDE.md`, Cursor rules, and Copilot instructions.
+- Conflicting instructions: for example "run all tests" and "avoid full test suites". Conflicts are scope-aware — two skills that never load together, or two unrelated nested `AGENTS.md` files, are not falsely flagged.
+- Duplicate rules across `AGENTS.md`, `CLAUDE.md`, Cursor rules, and Copilot instructions, naming the files involved.
+- Skill metadata quality: missing frontmatter, missing or too-thin/too-long `description`, and `name` that does not match the skill folder. Skill descriptions are what drive selection, so weak ones hurt and bloated ones add constant token cost.
 - Ambiguous test guidance that mentions tests without concrete commands.
-- Dangerous instructions such as `rm -rf`, `chmod 777`, `curl | bash`, or secret-file access.
+- Dangerous instructions such as `rm -rf`, `chmod 777`, `curl | bash`, or concrete secret-file reads (for example `cat .env`).
 - Package-manager mismatches such as `pnpm` instructions in an `npm` repo.
+- Nested context awareness: a nested `AGENTS.md`/`CLAUDE.md` is noted as loading only when working inside its directory, not for every task.
 
 Reports are split into two buckets: always-loaded context for files that agents normally see up front, and deferred skill context for `SKILL.md` files that should only load after a skill is selected. The main `Operational Score` weights always-loaded context at 80% and deferred skills at 20% when both exist. `Inventory Risk Score` is the worst-case score if every discovered context file were loaded.
 
-The first release is intentionally static analysis first. It gives fast signal without calling a model. The benchmark runner can be layered on top once the repo has generated tasks.
+Static analysis gives fast signal without calling a model. When you want measured results instead of estimates, the `run-bench` command runs your agent under different context conditions and records the success rates — see [Measured A/B benchmark](#measured-ab-benchmark).
 
 ## Skill Breakdown
 
@@ -92,7 +94,7 @@ When `SKILL.md` files are present, the report includes a per-skill table. Each s
 Terminal output shows the first 20 riskiest or largest skill files. Markdown and JSON reports include all skill rows.
 ## Metric Model
 
-These numbers are static heuristics, not measured agent runtime results. They are designed to flag likely context risk before you spend model calls. Real A/B benchmark adapters can replace these estimates later.
+These numbers are static heuristics, not measured agent runtime results. They are designed to flag likely context risk before you spend model calls. To replace the estimates with measured success rates, run the [A/B benchmark](#measured-ab-benchmark).
 
 - Estimated tokens: `ceil(character_count / 4.28)` for each context file. This is a calibrated approximation based on `o200k_base` tokenizer checks against representative AGENTS.md and SKILL.md reports, not exact tokenizer output for every model.
 - Score: starts at `100` and subtracts issue impact points. Error issues cost more than warnings; the final score is clamped to `0..100`.
@@ -121,7 +123,40 @@ Options:
 --max-lines <n>                 Context bloat line threshold (default: 350)
 --max-bytes <n>                 Context bloat byte threshold (default: 14000)
 --max-depth <n>                 Nested context file search depth (default: 6)
+--baseline <file.json>          Compare scores against a previous JSON report
+--exact-tokens                  Use the optional gpt-tokenizer for exact token counts
 ```
+
+### Config file
+
+Place a `.agent-context-bench.json` in the analyzed repo to set defaults. CLI flags always override config values.
+
+```json
+{
+  "maxLines": 250,
+  "maxBytes": 12000,
+  "maxDepth": 4,
+  "failUnder": 70,
+  "format": "markdown",
+  "ignoreDirs": ["fixtures", "examples"]
+}
+```
+
+### Exact token counts
+
+By default tokens are estimated with a calibrated `chars / 4.28` heuristic. Pass `--exact-tokens` to count with the real `o200k_base` tokenizer. This needs the optional `gpt-tokenizer` package; if it is not installed the CLI prints a warning and falls back to the heuristic.
+
+### Compare against a baseline
+
+Save a JSON report, then compare a later run against it to see whether an edit helped:
+
+```bash
+agent-context-bench --format json --output baseline.json
+# ...edit AGENTS.md / SKILL.md...
+agent-context-bench --baseline baseline.json
+```
+
+The text and markdown reports gain a baseline section showing the score, inventory risk, and token deltas.
 
 Generate a proposed slim context file:
 
@@ -155,7 +190,45 @@ Generate starter benchmark tasks from git history:
 agent-context-bench generate-bench --from-git-history --limit 20 --output .agent-context-bench/tasks.json
 ```
 
-The generated tasks identify small historical commits that look like bug fixes, validation fixes, tests, or refactors. They do not mutate the repo; they produce task metadata that a future Claude Code, Codex CLI, or Cursor adapter can execute.
+The generated tasks identify small historical commits that look like bug fixes, validation fixes, tests, or refactors. They do not mutate the repo; they produce task metadata that the `run-bench` command can execute.
+
+## Measured A/B benchmark
+
+`run-bench` turns the static estimates into measured results. It runs each task three ways — with **no** context, the **current** context, and the **optimized** context — and records whether the success command passes in each case. Success is observed (the exit status of your success command after the agent runs), not estimated.
+
+```bash
+agent-context-bench run-bench \
+  --agent "your-agent-cli --prompt-from-stdin" \
+  --success "npm test" \
+  --conditions none,current,optimized
+```
+
+- `--agent <cmd>` is the agent CLI to invoke per task. The task prompt is provided on stdin and in the `AGENT_BENCH_PROMPT`, `AGENT_BENCH_CONDITION`, and `AGENT_BENCH_WORKSPACE` environment variables; `{prompt}` and `{workspace}` placeholders in the command are substituted too. It runs with the prepared workspace as its working directory.
+- `--tasks <file.json>` supplies the task list (the output of `generate-bench`, or a plain JSON array). Without it, tasks are generated from git history.
+- `--success <cmd>` is the verification command (default: the repo's test script). It must exit `0` on success.
+- Each condition runs in an isolated workspace: a detached `git worktree` at the task's base commit when available, otherwise a copy of the working tree. The runner mutates only the context files for each condition and cleans up afterward.
+
+Example output:
+
+```text
+Bench summary (adapter: command)
+- Tasks: 12
+- none: 58% success, ~0 context tokens
+- current: 50% success, ~21000 context tokens
+- optimized: 75% success, ~5200 context tokens
+Measured deltas (success-rate points):
+- current vs none: -8
+- optimized vs current: +25
+- optimized vs none: +17
+```
+
+Each run is recorded to a history store (built-in SQLite, with a JSON Lines fallback) under `.agent-context-bench/history.db`. List past runs with:
+
+```bash
+agent-context-bench history --limit 20
+```
+
+Use `--no-history` to skip recording, or `--history-file <path>` to choose where it lives.
 
 ## GitHub Action
 
@@ -172,17 +245,21 @@ on:
 jobs:
   context:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: ahmtsahin/agent-context-bench@v1
         with:
           fail-under: "70"
           write-optimized: "true"
+          comment: "true"
 ```
 
 Create a `v1` tag before using the versioned action reference.
 
-The action writes a Markdown report to the job summary.
+The action writes a Markdown report to the job summary. With `comment: "true"` on a `pull_request` event it also posts (and updates) a PR comment via the `gh` CLI, which needs `pull-requests: write` permission.
 
 ## Development
 
@@ -198,8 +275,9 @@ Generated reports are ignored by default. Commit only scrubbed example reports i
 
 ## Roadmap
 
-- Add model adapters for Claude Code, Codex CLI, Cursor, OpenAI, Anthropic, and Gemini.
-- Run real A/B tasks with no context, current context, and optimized context.
-- Track run history in SQLite.
-- Comment context score on pull requests.
+- Ship ready-made adapters/presets for Claude Code, Codex CLI, Cursor, and the OpenAI/Anthropic/Gemini APIs on top of the generic command adapter.
+- Parse real token/cost usage from agent output instead of an optional reported `TOKENS=` line.
+- Trend view in the dashboard built from the run history store.
 - Add examples from public repositories.
+
+Done since the first release: scope-aware conflict detection, SKILL.md frontmatter validation, baseline comparison, config file, optional exact tokenizer, PR comments from the GitHub Action, and a measured A/B `run-bench` runner with a SQLite/JSONL run-history store.

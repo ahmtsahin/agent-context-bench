@@ -17,6 +17,10 @@ inputs:
     description: Write AGENTS.optimized.md during the action run.
     required: false
     default: "false"
+  comment:
+    description: Post the report as a pull request comment (updates the previous one).
+    required: false
+    default: "false"
 outputs:
   report-file:
     description: Markdown report path.
@@ -37,3 +41,14 @@ runs:
         node "$GITHUB_ACTION_PATH/dist/cli.js" "${args[@]}" | tee "$report_file"
         cat "$report_file" >> "$GITHUB_STEP_SUMMARY"
         echo "report-file=$report_file" >> "$GITHUB_OUTPUT"
+    - name: Comment on pull request
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        number="${{ github.event.pull_request.number }}"
+        report_file="${{ steps.run.outputs.report-file }}"
+        gh pr comment "$number" --body-file "$report_file" --edit-last \
+          || gh pr comment "$number" --body-file "$report_file"

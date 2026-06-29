@@ -1,0 +1,6 @@
+# Normalize line endings to LF in the repository to avoid CRLF churn on Windows.
+* text=auto eol=lf
+
+# Treat the committed build output and lockfile as generated.
+dist/** linguist-generated=true
+package-lock.json linguist-generated=true

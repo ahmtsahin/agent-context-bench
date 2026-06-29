@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { renderDashboardReports } from "./dashboard.js";
 export { renderDashboardReports } from "./dashboard.js";
+export * from "./bench.js";
+export * from "./history.js";
 const DEFAULT_MAX_LINES = 350;
 const DEFAULT_MAX_BYTES = 14_000;
 const DEFAULT_MAX_DEPTH = 6;
@@ -55,7 +57,7 @@ const DANGEROUS_CHECKS = [
     },
     {
         id: "secret-access",
-        regex: /\b(?:read|open|cat|inspect|load|use|access|print)\b.*(?:\.env|id_rsa|credentials?|secrets?)/i,
+        regex: /\b(?:read|cat|print|echo|dump|exfiltrate|copy|commit|paste)\b[^.\n]{0,40}(?:\.env\b|id_rsa\b|\.pem\b|private[\s_-]?key\b|secret(?:s)?\.(?:json|ya?ml|txt|env)\b|credentials\.(?:json|ya?ml|txt)\b)/i,
         title: "Secret access instruction",
         suggestion: "Tell agents not to read, print, or modify secrets unless explicitly requested."
     }
@@ -158,7 +160,6 @@ export function discoverContextFiles(rootInput = ".", options = {}) {
         }
         seen.add(key);
         const content = fs.readFileSync(normalized, "utf8").replace(/\r\n/g, "\n");
-        const stat = fs.statSync(normalized);
         files.push({
             absolutePath: normalized,
             relativePath: normalizePath(path.relative(root, normalized)),
@@ -166,8 +167,8 @@ export function discoverContextFiles(rootInput = ".", options = {}) {
             loadScope: contextLoadScope(kind),
             content,
             lineCount: content.length === 0 ? 0 : content.split("\n").length,
-            byteLength: stat.size,
-            tokenEstimate: estimateTokens(content)
+            byteLength: Buffer.byteLength(content, "utf8"),
+            tokenEstimate: estimateTokens(content, options.tokenizer)
         });
     };
     for (const relative of ROOT_CONTEXT_FILES) {
@@ -180,7 +181,8 @@ export function discoverContextFiles(rootInput = ".", options = {}) {
     else if (safeIsDirectory(cursorRules)) {
         walkRuleDirectory(cursorRules, root, addFile);
     }
-    walkForNamedContext(root, root, maxDepth, addFile);
+    const ignoreDirs = new Set([...IGNORE_DIRS, ...(options.ignoreDirs ?? [])]);
+    walkForNamedContext(root, root, maxDepth, ignoreDirs, addFile);
     return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 export function inferRepoSignals(rootInput = ".") {
@@ -288,6 +290,41 @@ export function renderReport(result, format = "text", optimizedPath) {
         return renderMarkdownReport(result, optimizedPath);
     }
     return renderTextReport(result, optimizedPath);
+}
+export function renderBaselineComparison(current, baseline, format = "text") {
+    const rows = [
+        ["Operational score", baseline.score, current.score, true],
+        ["Inventory risk score", baseline.inventoryRiskScore, current.inventoryRiskScore, true],
+        ["Estimated tokens", baseline.totals.tokenEstimate, current.totals.tokenEstimate, false]
+    ];
+    const label = baseline.label ?? "baseline";
+    if (format === "markdown") {
+        const lines = [];
+        lines.push("");
+        lines.push(`## Baseline Comparison (vs ${escapePipe(label)})`);
+        lines.push("");
+        lines.push("| Metric | Baseline | Current | Change |");
+        lines.push("| --- | ---: | ---: | ---: |");
+        for (const [name, before, after, higherIsBetter] of rows) {
+            lines.push(`| ${escapePipe(name)} | ${before} | ${after} | ${changeText(before, after, higherIsBetter)} |`);
+        }
+        return lines.join("\n");
+    }
+    const lines = [];
+    lines.push("");
+    lines.push(`Baseline comparison (vs ${label}):`);
+    for (const [name, before, after, higherIsBetter] of rows) {
+        lines.push(`- ${name}: ${before} -> ${after} (${changeText(before, after, higherIsBetter)})`);
+    }
+    return lines.join("\n");
+}
+function changeText(before, after, higherIsBetter) {
+    const delta = after - before;
+    if (delta === 0) {
+        return "no change";
+    }
+    const arrow = (higherIsBetter ? delta > 0 : delta < 0) ? "better" : "worse";
+    return `${signed(delta)} (${arrow})`;
 }
 export function generateBenchFromGitHistory(rootInput = ".", options = {}) {
     const root = path.resolve(rootInput);
@@ -406,26 +443,161 @@ function detectFileIssues(file, options, issues) {
             impact: 8
         });
     }
-}
-function detectConflicts(files, issues) {
-    const content = files.map((file) => file.content).join("\n");
-    for (const check of CONFLICT_CHECKS) {
-        if (!check.positive.test(content) || !check.negative.test(content)) {
-            continue;
-        }
-        const location = findFirstLine(files, check.negative) ?? findFirstLine(files, check.positive);
+    if (file.kind === "skill") {
+        detectSkillFrontmatterIssues(file, issues);
+    }
+    if (isNestedContext(file)) {
         issues.push({
-            id: check.id,
-            title: check.title,
-            severity: "error",
-            category: "conflict",
-            file: location?.file,
-            line: location?.line,
-            message: "Two instructions appear to point the agent in opposite directions.",
-            suggestion: check.suggestion,
-            impact: 14
+            id: "nested-context",
+            title: "Nested context file",
+            severity: "info",
+            category: "scope",
+            file: file.relativePath,
+            line: 1,
+            message: `${file.relativePath} is a nested ${file.kind === "claude" ? "CLAUDE.md" : "AGENTS.md"}; it usually loads only when working inside its directory, not for every task.`,
+            suggestion: "Keep nested context scoped to that subtree and avoid repeating root-level rules.",
+            impact: 0
         });
     }
+}
+function detectSkillFrontmatterIssues(file, issues) {
+    const frontmatter = parseFrontmatter(file.content);
+    if (!frontmatter) {
+        issues.push({
+            id: "skill-missing-frontmatter",
+            title: "Skill is missing frontmatter",
+            severity: "warn",
+            category: "skill-metadata",
+            file: file.relativePath,
+            line: 1,
+            message: `${file.relativePath} has no YAML frontmatter, so its name and description cannot drive skill selection.`,
+            suggestion: "Add a frontmatter block with `name:` and a specific `description:` that says when to use the skill.",
+            impact: 9
+        });
+        return;
+    }
+    const description = frontmatter.values.description ?? "";
+    if (!description) {
+        issues.push({
+            id: "skill-missing-description",
+            title: "Skill is missing a description",
+            severity: "warn",
+            category: "skill-metadata",
+            file: file.relativePath,
+            line: frontmatter.line,
+            message: "The skill frontmatter has no `description`, the field agents read to decide whether to load it.",
+            suggestion: "Add a `description:` that names the trigger (\"Use this when ...\") and the inputs it handles.",
+            impact: 9
+        });
+    }
+    else if (description.length < 20) {
+        issues.push({
+            id: "skill-thin-description",
+            title: "Skill description is too thin",
+            severity: "warn",
+            category: "skill-metadata",
+            file: file.relativePath,
+            line: frontmatter.line,
+            message: `The skill description is only ${description.length} characters, which is usually too vague to trigger reliably.`,
+            suggestion: "Describe the concrete task and trigger so the skill is selected when (and only when) it applies.",
+            impact: 5
+        });
+    }
+    else if (description.length > 500) {
+        // Skill descriptions live in the always-loaded skill index, so an overlong one is pure bloat.
+        issues.push({
+            id: "skill-bloated-description",
+            title: "Skill description is too long",
+            severity: "warn",
+            category: "skill-metadata",
+            file: file.relativePath,
+            line: frontmatter.line,
+            message: `The skill description is ${description.length} characters; descriptions load up front for every task, so long ones add constant token cost.`,
+            suggestion: "Tighten the description to one or two sentences and move detail into the skill body.",
+            impact: 6
+        });
+    }
+    const name = frontmatter.values.name;
+    const folder = skillFolderName(file.relativePath);
+    if (name && folder && normalizeRule(name) !== normalizeRule(folder)) {
+        issues.push({
+            id: "skill-name-mismatch",
+            title: "Skill name does not match its folder",
+            severity: "warn",
+            category: "skill-metadata",
+            file: file.relativePath,
+            line: frontmatter.line,
+            message: `Frontmatter name "${name}" does not match the skill folder "${folder}".`,
+            suggestion: "Align the frontmatter `name` with the skill directory so the skill resolves predictably.",
+            impact: 4
+        });
+    }
+}
+function parseFrontmatter(content) {
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match) {
+        return undefined;
+    }
+    const values = {};
+    const block = match[1].split("\n");
+    block.forEach((line) => {
+        const field = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+        if (field) {
+            values[field[1].toLowerCase()] = field[2].trim().replace(/^["']|["']$/g, "");
+        }
+    });
+    // Report the line of the description field when present, otherwise the opening marker.
+    const descriptionIndex = block.findIndex((line) => /^description\s*:/i.test(line));
+    return { values, line: descriptionIndex >= 0 ? descriptionIndex + 2 : 1 };
+}
+function skillFolderName(relativePath) {
+    const parts = relativePath.split("/");
+    const skillIndex = parts.lastIndexOf("SKILL.md");
+    return skillIndex > 0 ? parts[skillIndex - 1] : undefined;
+}
+function detectConflicts(files, issues) {
+    // Only compare instructions that can actually be loaded into the same context.
+    // Root always-loaded files co-load with everything; a deferred skill or a nested
+    // (subtree) AGENTS.md/CLAUDE.md only co-loads with the root always-loaded files,
+    // never with another skill or another subtree's file.
+    const rootAlways = files.filter((file) => file.loadScope === "always" && !isNestedContext(file));
+    const conditional = files.filter((file) => file.loadScope === "deferred" || isNestedContext(file));
+    const groups = [];
+    if (rootAlways.length > 0) {
+        groups.push(rootAlways);
+    }
+    for (const file of conditional) {
+        groups.push([...rootAlways, file]);
+    }
+    const seen = new Set();
+    for (const group of groups) {
+        const content = group.map((file) => file.content).join("\n");
+        for (const check of CONFLICT_CHECKS) {
+            if (!check.positive.test(content) || !check.negative.test(content)) {
+                continue;
+            }
+            const location = findFirstLine(group, check.negative) ?? findFirstLine(group, check.positive);
+            const key = `${check.id}:${location?.file ?? ""}:${location?.line ?? ""}`;
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            issues.push({
+                id: check.id,
+                title: check.title,
+                severity: "error",
+                category: "conflict",
+                file: location?.file,
+                line: location?.line,
+                message: "Two instructions that can load together point the agent in opposite directions.",
+                suggestion: check.suggestion,
+                impact: 14
+            });
+        }
+    }
+}
+function isNestedContext(file) {
+    return (file.kind === "agents" || file.kind === "claude") && file.relativePath.includes("/");
 }
 function detectDuplicateRules(files, issues) {
     const seen = new Map();
@@ -444,6 +616,7 @@ function detectDuplicateRules(files, issues) {
             if (existing) {
                 existing.count += 1;
                 existing.files.add(file.relativePath);
+                existing.scopes.add(file.loadScope);
             }
             else {
                 seen.set(key, {
@@ -451,16 +624,34 @@ function detectDuplicateRules(files, issues) {
                     file: file.relativePath,
                     line: index + 1,
                     count: 1,
-                    files: new Set([file.relativePath])
+                    files: new Set([file.relativePath]),
+                    scopes: new Set([file.loadScope])
                 });
             }
         });
     }
-    const duplicates = [...seen.values()].filter((value) => value.count > 1 || value.files.size > 1);
+    // A repeated rule only wastes context if the copies can load together: either it
+    // repeats within a single file, or it spans an always-loaded file. Two different
+    // deferred skills that never co-load are not a real duplication problem.
+    const duplicates = [...seen.values()].filter((value) => {
+        if (value.count <= 1 && value.files.size <= 1) {
+            return false;
+        }
+        return value.files.size === 1 || value.scopes.has("always");
+    });
     if (duplicates.length === 0) {
         return;
     }
     const first = duplicates[0];
+    const involved = new Set();
+    for (const duplicate of duplicates) {
+        for (const file of duplicate.files) {
+            involved.add(file);
+        }
+    }
+    const fileList = [...involved];
+    const shownFiles = fileList.slice(0, 4).join(", ");
+    const moreFiles = fileList.length > 4 ? ` and ${fileList.length - 4} more` : "";
     issues.push({
         id: "duplicate-rules",
         title: "Duplicate rules across context files",
@@ -468,7 +659,7 @@ function detectDuplicateRules(files, issues) {
         category: "duplication",
         file: first.file,
         line: first.line,
-        message: `${duplicates.length} repeated rule${duplicates.length === 1 ? "" : "s"} found across agent context files.`,
+        message: `${duplicates.length} repeated rule${duplicates.length === 1 ? "" : "s"} (for example "${truncate(first.raw, 80)}") found across: ${shownFiles}${moreFiles}.`,
         suggestion: "Keep one source of truth and delete repeated instructions from the other context files.",
         impact: Math.min(12, 4 + duplicates.length * 2)
     });
@@ -886,7 +1077,7 @@ function runScriptCommand(manager, script) {
     }
     return script === "test" ? "npm test" : `npm run ${script}`;
 }
-function walkForNamedContext(directory, root, maxDepth, addFile, depth = 0) {
+function walkForNamedContext(directory, root, maxDepth, ignoreDirs, addFile, depth = 0) {
     if (depth > maxDepth || !safeIsDirectory(directory)) {
         return;
     }
@@ -899,8 +1090,8 @@ function walkForNamedContext(directory, root, maxDepth, addFile, depth = 0) {
     }
     for (const entry of entries) {
         if (entry.isDirectory()) {
-            if (!IGNORE_DIRS.has(entry.name)) {
-                walkForNamedContext(path.join(directory, entry.name), root, maxDepth, addFile, depth + 1);
+            if (!ignoreDirs.has(entry.name)) {
+                walkForNamedContext(path.join(directory, entry.name), root, maxDepth, ignoreDirs, addFile, depth + 1);
             }
             continue;
         }
@@ -1053,7 +1244,15 @@ function sortIssues(issues) {
         return b.impact - a.impact;
     });
 }
-function estimateTokens(text) {
+function estimateTokens(text, tokenizer) {
+    if (tokenizer) {
+        try {
+            return Math.max(1, tokenizer(text));
+        }
+        catch {
+            // Fall back to the heuristic if the tokenizer throws on unusual input.
+        }
+    }
     return Math.max(1, Math.ceil(text.length / TOKEN_ESTIMATE_CHARS_PER_TOKEN));
 }
 function normalizePath(value) {
