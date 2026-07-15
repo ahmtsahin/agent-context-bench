@@ -1,5 +1,10 @@
 # agent-context-bench
 
+[![npm version](https://img.shields.io/npm/v/agent-context-bench.svg)](https://www.npmjs.com/package/agent-context-bench)
+[![npm downloads](https://img.shields.io/npm/dm/agent-context-bench.svg)](https://www.npmjs.com/package/agent-context-bench)
+[![CI](https://github.com/ahmtsahin/agent-context-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/ahmtsahin/agent-context-bench/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Put your `AGENTS.md` and `SKILL.md` files on a diet. Every line of agent context is paid for in tokens on each run — `agent-context-bench` measures that token cost and tells you whether the context is earning its place or just inflating the bill.
 
 `agent-context-bench` is a dependency-light CLI for auditing repository-level agent instructions: `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `.cursor/rules`, `.cursorrules`, and `.github/copilot-instructions.md`. It estimates the token footprint of each file (with an optional exact tokenizer), breaks the cost down per skill, separates context that loads on **every** task from skills that load only when selected, and flags the bloat, duplication, and conflicts that drive that cost up. Run the [A/B benchmark](#measured-ab-benchmark) to turn those estimates into measured success rates and token counts.
