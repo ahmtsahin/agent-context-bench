@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows
 semantic versioning.
 
+## [Unreleased]
+
+### Added
+- Subtree-scoped reporting and operational weights for nested `AGENTS.md` and
+  `CLAUDE.md` files.
+- Folded and literal multi-line YAML frontmatter value support.
+
+### Fixed
+- Benchmark conditions now require both the agent adapter and verification
+  command to succeed.
+- Command placeholders are substituted as arguments without shell interpolation.
+
 ## [0.4.0]
 
 ### Added

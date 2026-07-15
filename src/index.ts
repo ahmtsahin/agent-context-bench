@@ -9,7 +9,7 @@ export * from "./history.js";
 
 export type Severity = "info" | "warn" | "error";
 export type ReportFormat = "text" | "json" | "markdown" | "dashboard";
-export type LoadScope = "always" | "deferred";
+export type LoadScope = "always" | "scoped" | "deferred";
 
 export interface ContextTotals {
   files: number;
@@ -109,11 +109,13 @@ export interface AnalysisResult {
   inventoryEffect: EffectEstimate;
   operationalWeights: {
     always: number;
+    scoped: number;
     deferred: number;
   };
   skillReports: ContextFileSummary[];
   scopes: {
     always: ContextScopeSummary;
+    scoped: ContextScopeSummary;
     deferred: ContextScopeSummary;
   };
 }
@@ -356,11 +358,12 @@ export function discoverContextFiles(rootInput = ".", options: AnalyzeOptions = 
     }
     seen.add(key);
     const content = fs.readFileSync(normalized, "utf8").replace(/\r\n/g, "\n");
+    const relativePath = normalizePath(path.relative(root, normalized));
     files.push({
       absolutePath: normalized,
-      relativePath: normalizePath(path.relative(root, normalized)),
+      relativePath,
       kind,
-      loadScope: contextLoadScope(kind),
+      loadScope: contextLoadScope(kind, relativePath),
       content,
       lineCount: content.length === 0 ? 0 : content.split("\n").length,
       byteLength: Buffer.byteLength(content, "utf8"),
@@ -812,12 +815,25 @@ function parseFrontmatter(content: string): { values: Record<string, string>; li
   }
   const values: Record<string, string> = {};
   const block = match[1].split("\n");
-  block.forEach((line) => {
+  for (let index = 0; index < block.length; index += 1) {
+    const line = block[index];
     const field = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
     if (field) {
-      values[field[1].toLowerCase()] = field[2].trim().replace(/^["']|["']$/g, "");
+      let value = field[2].trim();
+      if (value === ">" || value === "|") {
+        const folded = value === ">";
+        const continuation: string[] = [];
+        while (index + 1 < block.length && /^\s+/.test(block[index + 1])) {
+          continuation.push(block[index + 1].trim());
+          index += 1;
+        }
+        value = continuation.join(folded ? " " : "\n").trim();
+      } else {
+        value = value.replace(/^["']|["']$/g, "");
+      }
+      values[field[1].toLowerCase()] = value;
     }
-  });
+  }
   // Report the line of the description field when present, otherwise the opening marker.
   const descriptionIndex = block.findIndex((line) => /^description\s*:/i.test(line));
   return { values, line: descriptionIndex >= 0 ? descriptionIndex + 2 : 1 };
@@ -1110,8 +1126,10 @@ function sumFileTotals(files: ContextFile[]): ContextTotals {
 function buildScopeSummaries(files: ContextFile[], issues: Issue[]): AnalysisResult["scopes"] {
   const filesByPath = new Map(files.map((file) => [file.relativePath, file]));
   const alwaysFiles = files.filter((file) => file.loadScope === "always");
+  const scopedFiles = files.filter((file) => file.loadScope === "scoped");
   const deferredFiles = files.filter((file) => file.loadScope === "deferred");
   const alwaysIssues = issues.filter((issue) => issueLoadScope(issue, filesByPath) === "always");
+  const scopedIssues = issues.filter((issue) => issueLoadScope(issue, filesByPath) === "scoped");
   const deferredIssues = issues.filter((issue) => issueLoadScope(issue, filesByPath) === "deferred");
 
   return {
@@ -1120,6 +1138,12 @@ function buildScopeSummaries(files: ContextFile[], issues: Issue[]): AnalysisRes
       "Files expected to be loaded up front: AGENTS.md, CLAUDE.md, Cursor rules, and Copilot instructions.",
       alwaysFiles,
       alwaysIssues
+    ),
+    scoped: buildScopeSummary(
+      "Subtree-scoped context",
+      "Nested AGENTS.md and CLAUDE.md files that load only for work inside their directory tree.",
+      scopedFiles,
+      scopedIssues
     ),
     deferred: buildScopeSummary(
       "Deferred skill context",
@@ -1208,21 +1232,38 @@ function contextFileDisplayName(file: ContextFile): string {
 
 function scopeWeights(scopes: AnalysisResult["scopes"]): AnalysisResult["operationalWeights"] {
   const hasAlways = scopes.always.totals.files > 0 || scopes.always.issues.length > 0;
+  const hasScoped = scopes.scoped.totals.files > 0 || scopes.scoped.issues.length > 0;
   const hasDeferred = scopes.deferred.totals.files > 0 || scopes.deferred.issues.length > 0;
+  if (hasAlways && hasScoped && hasDeferred) {
+    return { always: 0.7, scoped: 0.15, deferred: 0.15 };
+  }
   if (hasAlways && hasDeferred) {
-    return { always: 0.8, deferred: 0.2 };
+    return { always: 0.8, scoped: 0, deferred: 0.2 };
+  }
+  if (hasAlways && hasScoped) {
+    return { always: 0.8, scoped: 0.2, deferred: 0 };
+  }
+  if (hasScoped && hasDeferred) {
+    return { always: 0, scoped: 0.5, deferred: 0.5 };
   }
   if (hasDeferred && !hasAlways) {
-    return { always: 0, deferred: 1 };
+    return { always: 0, scoped: 0, deferred: 1 };
   }
-  return { always: 1, deferred: 0 };
+  if (hasScoped && !hasAlways) {
+    return { always: 0, scoped: 1, deferred: 0 };
+  }
+  return { always: 1, scoped: 0, deferred: 0 };
 }
 
 function operationalScore(
   scopes: AnalysisResult["scopes"],
   weights: AnalysisResult["operationalWeights"]
 ): number {
-  return Math.round(scopes.always.score * weights.always + scopes.deferred.score * weights.deferred);
+  return Math.round(
+    scopes.always.score * weights.always +
+    scopes.scoped.score * weights.scoped +
+    scopes.deferred.score * weights.deferred
+  );
 }
 
 function estimateOperationalEffect(
@@ -1230,7 +1271,11 @@ function estimateOperationalEffect(
   weights: AnalysisResult["operationalWeights"]
 ): EffectEstimate {
   const weighted = (field: keyof Omit<EffectEstimate, "risk">) =>
-    Math.round(scopes.always.effect[field] * weights.always + scopes.deferred.effect[field] * weights.deferred);
+    Math.round(
+      scopes.always.effect[field] * weights.always +
+      scopes.scoped.effect[field] * weights.scoped +
+      scopes.deferred.effect[field] * weights.deferred
+    );
   return {
     taskSuccessDeltaPct: weighted("taskSuccessDeltaPct"),
     tokenCostDeltaPct: weighted("tokenCostDeltaPct"),
@@ -1243,6 +1288,9 @@ function estimateOperationalEffect(
 function operationalRisk(scopes: AnalysisResult["scopes"], weights: AnalysisResult["operationalWeights"]): string {
   if (weights.always > 0 && scopes.always.effect.risk !== "No major risk detected") {
     return scopes.always.effect.risk;
+  }
+  if (weights.scoped > 0 && scopes.scoped.effect.risk !== "No major risk detected") {
+    return `Subtree-scoped risk: ${scopes.scoped.effect.risk}`;
   }
   if (weights.deferred > 0 && scopes.deferred.effect.risk !== "No major risk detected") {
     return `Deferred skill risk: ${scopes.deferred.effect.risk}`;
@@ -1296,7 +1344,7 @@ function renderTextReport(result: AnalysisResult, optimizedPath?: string): strin
   lines.push(`Operational Score: ${result.score}/100`);
   lines.push(`Inventory Risk Score: ${result.inventoryRiskScore}/100`);
   lines.push("");
-  lines.push(`Operational weights: always-loaded ${Math.round(result.operationalWeights.always * 100)}%, deferred skills ${Math.round(result.operationalWeights.deferred * 100)}%`);
+  lines.push(`Operational weights: always-loaded ${Math.round(result.operationalWeights.always * 100)}%, subtree-scoped ${Math.round(result.operationalWeights.scoped * 100)}%, deferred skills ${Math.round(result.operationalWeights.deferred * 100)}%`);
   lines.push(`Inventory context: ${result.totals.files} files, ${result.totals.lines} lines, ${result.totals.bytes} bytes, ~${result.totals.tokenEstimate} tokens`);
   lines.push("Operational effect on agent:");
   lines.push(`- Task success: ${signed(result.effect.taskSuccessDeltaPct)}%`);
@@ -1312,6 +1360,7 @@ function renderTextReport(result: AnalysisResult, optimizedPath?: string): strin
   lines.push(`- Risk: ${result.inventoryEffect.risk}`);
 
   renderTextScope(lines, result.scopes.always);
+  renderTextScope(lines, result.scopes.scoped);
   renderTextScope(lines, result.scopes.deferred);
   renderTextSkillBreakdown(lines, result.skillReports, 20);
 
@@ -1330,15 +1379,17 @@ function renderMarkdownReport(result: AnalysisResult, optimizedPath?: string): s
   lines.push(`**Operational Score:** ${result.score}/100`);
   lines.push(`**Inventory Risk Score:** ${result.inventoryRiskScore}/100`);
   lines.push("");
-  lines.push(`Operational weights: always-loaded ${Math.round(result.operationalWeights.always * 100)}%, deferred skills ${Math.round(result.operationalWeights.deferred * 100)}%.`);
+  lines.push(`Operational weights: always-loaded ${Math.round(result.operationalWeights.always * 100)}%, subtree-scoped ${Math.round(result.operationalWeights.scoped * 100)}%, deferred skills ${Math.round(result.operationalWeights.deferred * 100)}%.`);
   lines.push("");
   lines.push("| Scope | Score | Files | Lines | Estimated tokens | Task success | Token cost | Files explored | Risk |");
   lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   lines.push(markdownScopeRow("Inventory risk", result.inventoryRiskScore, result.totals, result.inventoryEffect));
   lines.push(markdownScopeRow(result.scopes.always.label, result.scopes.always.score, result.scopes.always.totals, result.scopes.always.effect));
+  lines.push(markdownScopeRow(result.scopes.scoped.label, result.scopes.scoped.score, result.scopes.scoped.totals, result.scopes.scoped.effect));
   lines.push(markdownScopeRow(result.scopes.deferred.label, result.scopes.deferred.score, result.scopes.deferred.totals, result.scopes.deferred.effect));
 
   renderMarkdownScope(lines, result.scopes.always);
+  renderMarkdownScope(lines, result.scopes.scoped);
   renderMarkdownScope(lines, result.scopes.deferred);
   renderMarkdownSkillBreakdown(lines, result.skillReports);
 
@@ -1588,8 +1639,14 @@ function walkRuleDirectory(
   }
 }
 
-function contextLoadScope(kind: string): LoadScope {
-  return kind === "skill" ? "deferred" : "always";
+function contextLoadScope(kind: string, relativePath: string): LoadScope {
+  if (kind === "skill") {
+    return "deferred";
+  }
+  if ((kind === "agents" || kind === "claude") && relativePath.includes("/")) {
+    return "scoped";
+  }
+  return "always";
 }
 
 function contextKind(relative: string): string {

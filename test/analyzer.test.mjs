@@ -98,7 +98,27 @@ test("renders json report without embedding file contents", () => {
   assert.equal(parsed.files[0].loadScope, "always");
   assert.equal(parsed.files[0].content, undefined);
   assert.equal(parsed.scopes.always.totals.files, 1);
+  assert.equal(parsed.scopes.scoped.totals.files, 0);
   assert.equal(parsed.scopes.deferred.totals.files, 0);
+});
+
+test("separates nested agent files into subtree-scoped context", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "packages", "api"), { recursive: true });
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
+  fs.writeFileSync(path.join(root, "packages", "api", "AGENTS.md"), "Only edit API files for API tasks.\n");
+
+  const result = analyzeRepo(root);
+  const nested = result.files.find((file) => file.relativePath === "packages/api/AGENTS.md");
+
+  assert.equal(nested?.loadScope, "scoped");
+  assert.equal(result.scopes.always.totals.files, 1);
+  assert.equal(result.scopes.scoped.totals.files, 1);
+  assert.equal(result.scopes.deferred.totals.files, 0);
+  assert.equal(result.operationalWeights.always, 0.8);
+  assert.equal(result.operationalWeights.scoped, 0.2);
+  assert.equal(result.operationalWeights.deferred, 0);
+  assert.ok(result.scopes.scoped.issues.some((issue) => issue.id === "nested-context"));
 });
 
 test("includes SKILL.md files in context scoring", () => {
@@ -248,6 +268,27 @@ test("accepts a well-formed skill description without metadata warnings", () => 
   assert.ok(!ids.includes("skill-thin-description"));
   assert.ok(!ids.includes("skill-missing-description"));
   assert.ok(!ids.includes("skill-name-mismatch"));
+});
+
+test("accepts folded multi-line skill descriptions", () => {
+  const root = tempRepo();
+  fs.mkdirSync(path.join(root, "skills", "deploy"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "skills", "deploy", "SKILL.md"),
+    [
+      "---",
+      "name: deploy",
+      "description: >",
+      "  Use this when the user wants to deploy the service.",
+      "  It covers staging and production release steps.",
+      "---",
+      "Body content here."
+    ].join("\n")
+  );
+
+  const ids = issueIds(analyzeRepo(root));
+  assert.ok(!ids.includes("skill-thin-description"));
+  assert.ok(!ids.includes("skill-missing-description"));
 });
 
 test("narrows secret-access detection to concrete secret reads", () => {
@@ -428,6 +469,46 @@ test("bench reports failure when the success command fails", () => {
   });
 
   assert.equal(summary.successRate.current, 0);
+});
+
+test("bench reports failure when the agent adapter fails", () => {
+  const root = tempRepo();
+  const summary = runBench(root, {
+    adapter: { name: "failing", run: () => ({ ok: false, output: "failed", exitCode: 1 }) },
+    tasks: [{ id: "task-1", prompt: "noop" }],
+    conditions: ["current"],
+    successCommand: NOOP_COMMAND
+  });
+
+  const condition = summary.results[0].conditions[0];
+  assert.equal(condition.adapterOk, false);
+  assert.equal(condition.success, false);
+  assert.match(condition.note, /agent command failed/);
+});
+
+test("command adapter passes placeholders without shell interpolation", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "agent context bench-"));
+  const prompt = "hello \"quoted\" & goodbye!";
+  fs.writeFileSync(path.join(workspace, "print-args.mjs"), "console.log(JSON.stringify(process.argv.slice(2)));\n");
+  const adapter = commandAdapter("node print-args.mjs {prompt} {workspace}");
+  const run = adapter.run({
+    prompt,
+    workspace,
+    condition: "current",
+    timeoutMs: 10_000
+  });
+
+  assert.equal(run.ok, true);
+  assert.deepEqual(JSON.parse(run.output.trim()), [prompt, workspace]);
+
+  const rejected = commandAdapter("node print-args.mjs {prompt} | node").run({
+    prompt,
+    workspace,
+    condition: "current",
+    timeoutMs: 10_000
+  });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.output, /shell operators cannot be combined/);
 });
 
 test("history store records and lists runs", () => {

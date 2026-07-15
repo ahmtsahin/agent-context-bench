@@ -77,7 +77,7 @@ Run with --write-optimized to generate it.
 - Package-manager mismatches such as `pnpm` instructions in an `npm` repo.
 - Nested context awareness: a nested `AGENTS.md`/`CLAUDE.md` is noted as loading only when working inside its directory, not for every task.
 
-Reports are split into two buckets: always-loaded context for files that agents normally see up front, and deferred skill context for `SKILL.md` files that should only load after a skill is selected. The main `Operational Score` weights always-loaded context at 80% and deferred skills at 20% when both exist. `Inventory Risk Score` is the worst-case score if every discovered context file were loaded.
+Reports are split into three buckets: always-loaded root context, subtree-scoped nested `AGENTS.md`/`CLAUDE.md` files, and deferred `SKILL.md` context. When all three exist, the `Operational Score` weights them at 70%, 15%, and 15%; when always-loaded context is paired with only one conditional scope, the weights are 80% and 20%. `Inventory Risk Score` remains the worst-case score if every discovered context file were loaded.
 
 Static analysis gives fast signal without calling a model. When you want measured results instead of estimates, the `run-bench` command runs your agent under different context conditions and records the success rates — see [Measured A/B benchmark](#measured-ab-benchmark).
 
@@ -99,7 +99,7 @@ These numbers are static heuristics, not measured agent runtime results. They ar
 
 - Estimated tokens: `ceil(character_count / 4.28)` for each context file. This is a calibrated approximation based on `o200k_base` tokenizer checks against representative AGENTS.md and SKILL.md reports, not exact tokenizer output for every model.
 - Score: starts at `100` and subtracts issue impact points. Error issues cost more than warnings; the final score is clamped to `0..100`.
-- Operational Score: weighted score for normal usage. When both scopes exist, always-loaded context counts 80% and deferred skills count 20%. If only one scope exists, that scope gets 100% weight.
+- Operational Score: weighted score for normal usage. Always-loaded, subtree-scoped, and deferred contexts use 70%/15%/15% when all are present; always-loaded plus one conditional scope uses 80%/20%; subtree-scoped plus deferred uses 50%/50%; a single scope gets 100%.
 - Inventory Risk Score: worst-case score across every discovered context file, including all `SKILL.md` files.
 - Task success estimate: predicted success drag from context problems. Formula: `-min(65, round((100 - score) / 2 + error_count * 3 + warning_count))`.
 - Token cost estimate: predicted extra context/tool cost pressure. Formula: `min(180, round(tokens / 120 + bloat_count * 14 + duplicate_count * 6 + conflict_count * 8))`.
@@ -208,9 +208,9 @@ agent-context-bench run-bench \
   --conditions none,current,optimized
 ```
 
-- `--agent <cmd>` is the agent CLI to invoke per task. The task prompt is provided on stdin and in the `AGENT_BENCH_PROMPT`, `AGENT_BENCH_CONDITION`, and `AGENT_BENCH_WORKSPACE` environment variables; `{prompt}` and `{workspace}` placeholders in the command are substituted too. It runs with the prepared workspace as its working directory.
+- `--agent <cmd>` is the agent CLI to invoke per task. The task prompt is provided on stdin and in the `AGENT_BENCH_PROMPT`, `AGENT_BENCH_CONDITION`, and `AGENT_BENCH_WORKSPACE` environment variables. Commands containing `{prompt}` or `{workspace}` are parsed into executable arguments and substituted without shell interpolation; combine shell pipelines with stdin or the environment variables instead. It runs with the prepared workspace as its working directory.
 - `--tasks <file.json>` supplies the task list (the output of `generate-bench`, or a plain JSON array). Without it, tasks are generated from git history.
-- `--success <cmd>` is the verification command (default: the repo's test script). It must exit `0` on success.
+- `--success <cmd>` is the verification command (default: the repo's test script). A condition counts as successful only when both the agent command and this verification command exit `0`.
 - Each condition runs in an isolated workspace: a detached `git worktree` at the task's base commit when available, otherwise a copy of the working tree. The runner mutates only the context files for each condition and cleans up afterward.
 
 Example output:

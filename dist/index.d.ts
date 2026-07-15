@@ -3,7 +3,7 @@ export * from "./bench.js";
 export * from "./history.js";
 export type Severity = "info" | "warn" | "error";
 export type ReportFormat = "text" | "json" | "markdown" | "dashboard";
-export type LoadScope = "always" | "deferred";
+export type LoadScope = "always" | "scoped" | "deferred";
 export interface ContextTotals {
     files: number;
     lines: number;
@@ -94,11 +94,13 @@ export interface AnalysisResult {
     inventoryEffect: EffectEstimate;
     operationalWeights: {
         always: number;
+        scoped: number;
         deferred: number;
     };
     skillReports: ContextFileSummary[];
     scopes: {
         always: ContextScopeSummary;
+        scoped: ContextScopeSummary;
         deferred: ContextScopeSummary;
     };
 }

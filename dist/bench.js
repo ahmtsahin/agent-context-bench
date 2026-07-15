@@ -33,11 +33,11 @@ export function runBench(rootInput, options) {
                 conditionResults.push({
                     condition,
                     adapterOk: run.ok,
-                    success: verification.success,
+                    success: run.ok && verification.success,
                     durationMs,
                     contextTokens,
                     tokensUsed: run.tokensUsed,
-                    note: verification.note
+                    note: combineNotes(run.ok ? undefined : `agent command failed${run.exitCode === undefined ? "" : ` (exit ${run.exitCode})`}`, verification.note)
                 });
             }
             finally {
@@ -63,11 +63,8 @@ export function commandAdapter(command, name = "command") {
     return {
         name,
         run({ prompt, workspace, condition, timeoutMs }) {
-            const withPrompt = command.includes("{prompt}") ? command.replace(/\{prompt\}/g, shellQuote(prompt)) : command;
-            const finalCommand = withPrompt.replace(/\{workspace\}/g, workspace);
-            const result = spawnSync(finalCommand, {
+            const spawnOptions = {
                 cwd: workspace,
-                shell: true,
                 encoding: "utf8",
                 timeout: timeoutMs,
                 input: prompt,
@@ -77,7 +74,27 @@ export function commandAdapter(command, name = "command") {
                     AGENT_BENCH_CONDITION: condition,
                     AGENT_BENCH_WORKSPACE: workspace
                 }
-            });
+            };
+            let result;
+            try {
+                if (/\{(?:prompt|workspace)\}/.test(command)) {
+                    const expand = (value) => value
+                        .replace(/\{prompt\}/g, prompt)
+                        .replace(/\{workspace\}/g, workspace);
+                    const [executable, ...args] = parseCommandTemplate(command);
+                    result = spawnSync(expand(executable), args.map(expand), spawnOptions);
+                }
+                else {
+                    result = spawnSync(command, { ...spawnOptions, shell: true });
+                }
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return {
+                    ok: false,
+                    output: `agent command error: ${message}`
+                };
+            }
             const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
             return {
                 ok: !result.error && result.status === 0,
@@ -199,11 +216,69 @@ function parseReportedTokens(output) {
     const match = output.match(/\bTOKENS?\b\s*[=:]\s*(\d+)/i);
     return match ? Number(match[1]) : undefined;
 }
-function shellQuote(value) {
-    if (process.platform === "win32") {
-        return `"${value.replace(/"/g, '""')}"`;
+function parseCommandTemplate(command) {
+    const args = [];
+    let current = "";
+    let quote;
+    let tokenStarted = false;
+    for (let index = 0; index < command.length; index += 1) {
+        const char = command[index];
+        if (quote) {
+            if (char === quote) {
+                quote = undefined;
+            }
+            else if (char === "\\" &&
+                quote === "\"" &&
+                command[index + 1] === "\"") {
+                current += "\"";
+                index += 1;
+            }
+            else {
+                current += char;
+            }
+            tokenStarted = true;
+            continue;
+        }
+        if (char === "\"" || char === "'") {
+            quote = char;
+            tokenStarted = true;
+            continue;
+        }
+        if (/\s/.test(char)) {
+            if (tokenStarted) {
+                args.push(current);
+                current = "";
+                tokenStarted = false;
+            }
+            continue;
+        }
+        if (/[|&;<>]/.test(char)) {
+            throw new Error("shell operators cannot be combined with {prompt} or {workspace}; use stdin or AGENT_BENCH_* variables instead");
+        }
+        const next = command[index + 1] ?? "";
+        if (char === "\\" && /[\s"'\\]/.test(next)) {
+            current += next;
+            index += 1;
+        }
+        else {
+            current += char;
+        }
+        tokenStarted = true;
     }
-    return `'${value.replace(/'/g, "'\\''")}'`;
+    if (quote) {
+        throw new Error("unclosed quote in agent command");
+    }
+    if (tokenStarted) {
+        args.push(current);
+    }
+    if (args.length === 0) {
+        throw new Error("agent command is empty");
+    }
+    return args;
+}
+function combineNotes(...notes) {
+    const present = notes.filter((note) => Boolean(note));
+    return present.length > 0 ? present.join("; ") : undefined;
 }
 function sanitize(value) {
     return value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
