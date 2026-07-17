@@ -12,6 +12,11 @@ semantic versioning.
 - Folded and literal multi-line YAML frontmatter value support.
 
 ### Fixed
+- The `optimized` bench condition now writes a `CLAUDE.md` bridge file
+  (`@AGENTS.md`) when the repo's context included a root `CLAUDE.md`, so agents
+  that load `CLAUDE.md` but not `AGENTS.md` (for example Claude Code) still see
+  the optimized context. Verified empirically: headless `claude -p` applies
+  `CLAUDE.md` and `@AGENTS.md` imports but ignores a bare `AGENTS.md`.
 - Benchmark conditions now require both the agent adapter and verification
   command to succeed.
 - Command placeholders are substituted as arguments without shell interpolation.

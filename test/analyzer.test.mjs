@@ -451,6 +451,49 @@ test("runs an A/B bench and measures success per context condition", () => {
   assert.equal(summary.deltas.currentVsNone, 0);
 });
 
+test("optimized condition bridges root CLAUDE.md repos via an import file", () => {
+  const probeWorkspaces = (repoFiles) => {
+    const root = tempRepo();
+    const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });
+    git("init");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    for (const [name, content] of Object.entries(repoFiles)) {
+      fs.writeFileSync(path.join(root, name), content);
+    }
+    git("add", ".");
+    git("commit", "-m", "init");
+
+    let claudeBridge;
+    const adapter = {
+      name: "probe",
+      run({ workspace }) {
+        const bridgePath = path.join(workspace, "CLAUDE.md");
+        claudeBridge = fs.existsSync(bridgePath) ? fs.readFileSync(bridgePath, "utf8") : null;
+        return { ok: true, output: "" };
+      }
+    };
+    runBench(root, {
+      adapter,
+      tasks: [{ id: "task-1", prompt: "noop" }],
+      conditions: ["optimized"],
+      successCommand: NOOP_COMMAND
+    });
+    return claudeBridge;
+  };
+
+  assert.equal(
+    probeWorkspaces({ "CLAUDE.md": "Always run the tests before finishing.\n" }),
+    "@AGENTS.md\n",
+    "a repo with a root CLAUDE.md should keep the optimized context reachable for Claude Code"
+  );
+  assert.equal(
+    probeWorkspaces({ "AGENTS.md": "Always run the tests before finishing.\n" }),
+    null,
+    "a repo without a root CLAUDE.md should not gain one"
+  );
+});
+
 test("bench reports failure when the success command fails", () => {
   const root = tempRepo();
   const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });

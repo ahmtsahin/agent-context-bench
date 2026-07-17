@@ -169,9 +169,15 @@ function applyCondition(workspace, condition) {
         return contextTokensFor(workspace);
     }
     if (condition === "optimized") {
+        const hadRootClaudeMd = discoverContextFiles(workspace).some((file) => file.relativePath === "CLAUDE.md");
         const optimized = generateOptimizedAgents(analyzeRepo(workspace));
         removeContextFiles(workspace);
         fs.writeFileSync(path.join(workspace, "AGENTS.md"), optimized, "utf8");
+        if (hadRootClaudeMd) {
+            // Claude Code loads CLAUDE.md but not AGENTS.md, so repos that relied on a
+            // root CLAUDE.md keep the optimized context visible via an import bridge.
+            fs.writeFileSync(path.join(workspace, "CLAUDE.md"), "@AGENTS.md\n", "utf8");
+        }
         return contextTokensFor(workspace);
     }
     removeContextFiles(workspace);
