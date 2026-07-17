@@ -451,6 +451,27 @@ test("runs an A/B bench and measures success per context condition", () => {
   assert.equal(summary.deltas.currentVsNone, 0);
 });
 
+test("optimized notes drop stale references, contested directives, and fragments", () => {
+  const root = tempRepo();
+  fs.writeFileSync(
+    path.join(root, "CLAUDE.md"),
+    [
+      "- Consult the architecture doc at `docs/architecture.md` before edits.",
+      "- Always run Prettier on every file you touch before committing.",
+      "- Do not reformat existing files; keep diffs minimal in every change.",
+      "- Run `npm test` to execute the suite.",
+      "- wrapped fragment continues here with `code` from the previous line."
+    ].join("\n")
+  );
+
+  const optimized = generateOptimizedAgents(analyzeRepo(root));
+  assert.ok(optimized.includes("Run `npm test` to execute the suite"));
+  assert.ok(!optimized.includes("docs/architecture.md"));
+  assert.ok(!optimized.includes("Prettier"));
+  assert.ok(!optimized.includes("reformat"));
+  assert.ok(!optimized.includes("wrapped fragment"));
+});
+
 test("optimized condition bridges root CLAUDE.md repos via an import file", () => {
   const probeWorkspaces = (repoFiles) => {
     const root = tempRepo();

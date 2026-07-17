@@ -265,7 +265,7 @@ export function inferRepoSignals(rootInput = ".") {
 export function generateOptimizedAgents(result) {
     const repo = result.repo;
     const lines = [];
-    const usefulRules = extractUsefulRules(result.files);
+    const usefulRules = extractUsefulRules(result.files, result.issues);
     lines.push("# AGENTS.md");
     lines.push("");
     lines.push("## Project Snapshot");
@@ -1336,13 +1336,34 @@ function contextKind(relative) {
     }
     return "context";
 }
-function extractUsefulRules(files) {
+function extractUsefulRules(files, issues = []) {
+    // Lines flagged as pointing at missing paths would carry stale references
+    // straight into the optimized file.
+    const flaggedLines = new Set();
+    for (const issue of issues) {
+        if (issue.id === "missing-reference") {
+            flaggedLines.add(`${issue.file}:${issue.line}`);
+        }
+    }
     const rules = [];
     const seen = new Set();
     for (const file of files) {
-        for (const line of file.content.split("\n")) {
-            const cleaned = cleanupRuleLine(line);
+        const lines = file.content.split("\n");
+        for (let index = 0; index < lines.length; index += 1) {
+            const cleaned = cleanupRuleLine(lines[index]);
             if (!cleaned || cleaned.length > 180 || VAGUE_REGEX.test(cleaned)) {
+                continue;
+            }
+            if (flaggedLines.has(`${file.relativePath}:${index + 1}`)) {
+                continue;
+            }
+            // Hard-wrapped continuation lines read as mid-sentence fragments.
+            if (/^[a-z]/.test(cleaned)) {
+                continue;
+            }
+            // Directives that sit on either side of a known conflict pattern are
+            // contested; carrying one side forward silently picks a winner.
+            if (CONFLICT_CHECKS.some((check) => check.positive.test(cleaned) || check.negative.test(cleaned))) {
                 continue;
             }
             if (DANGEROUS_CHECKS.some((check) => check.regex.test(cleaned))) {
