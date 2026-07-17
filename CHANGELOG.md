@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows
 semantic versioning.
 
-## [Unreleased]
+## [0.4.1]
 
 ### Added
 - A measured A/B case study run with headless Claude Code (Sonnet): 4 restored
