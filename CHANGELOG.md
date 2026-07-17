@@ -12,6 +12,14 @@ semantic versioning.
 - Folded and literal multi-line YAML frontmatter value support.
 
 ### Fixed
+- The generated Working Rules no longer tell agents to stop and ask before
+  network access. In measured A/B bench runs, headless agents obeyed the rule
+  literally, ended their run with a question nobody could answer, and failed
+  tasks they had already half-solved. The rule now directs agents to take the
+  smallest safe local alternative when approval is impossible.
+- Optimized-file "Notes To Keep" no longer carry over rules that point at
+  missing paths, rules sitting on either side of a detected conflict pair, or
+  hard-wrapped mid-sentence line fragments.
 - The `optimized` bench condition now writes a `CLAUDE.md` bridge file
   (`@AGENTS.md`) when the repo's context included a root `CLAUDE.md`, so agents
   that load `CLAUDE.md` but not `AGENTS.md` (for example Claude Code) still see

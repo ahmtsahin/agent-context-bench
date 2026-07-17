@@ -290,7 +290,7 @@ export function generateOptimizedAgents(result) {
     lines.push("- Keep changes scoped to the requested behavior and the nearby code style.");
     lines.push("- Prefer focused tests first; run broader checks when shared behavior or public contracts change.");
     lines.push("- Do not read, print, or modify secrets such as `.env`, credentials, keys, or tokens.");
-    lines.push("- Ask before destructive filesystem actions, broad rewrites, dependency upgrades, or network access.");
+    lines.push("- Avoid destructive filesystem actions, broad rewrites, dependency upgrades, and unrequested network access; when approval is impossible (headless runs), take the smallest safe local alternative instead of stopping to ask.");
     lines.push("");
     lines.push("## Avoid");
     lines.push("- Repeating generic coding advice that is already expected from the agent.");
