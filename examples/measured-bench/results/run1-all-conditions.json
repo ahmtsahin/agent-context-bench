@@ -1,0 +1,144 @@
+{
+  "adapter": "command",
+  "generatedAt": "2026-07-17T08:57:38.978Z",
+  "root": "<tmp>/bench-repo",
+  "conditions": [
+    "none",
+    "current",
+    "optimized"
+  ],
+  "tasks": 4,
+  "successRate": {
+    "none": 1,
+    "current": 0.25,
+    "optimized": 0.25
+  },
+  "avgContextTokens": {
+    "none": 0,
+    "current": 3383,
+    "optimized": 403
+  },
+  "deltas": {
+    "currentVsNone": -75,
+    "optimizedVsCurrent": 0,
+    "optimizedVsNone": -75
+  },
+  "results": [
+    {
+      "taskId": "empty-skill-warning",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 197303,
+          "contextTokens": 0,
+          "tokensUsed": 2573672
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 166722,
+          "contextTokens": 3383,
+          "tokensUsed": 1845890
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 171176,
+          "contextTokens": 401,
+          "tokensUsed": 1689754
+        }
+      ]
+    },
+    {
+      "taskId": "conflict-comments-detection",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 158380,
+          "contextTokens": 0,
+          "tokensUsed": 1788448
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 358454,
+          "contextTokens": 3383,
+          "tokensUsed": 3839270
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 145592,
+          "contextTokens": 403,
+          "tokensUsed": 2402997
+        }
+      ]
+    },
+    {
+      "taskId": "missing-reference-precision",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 167665,
+          "contextTokens": 0,
+          "tokensUsed": 2338582
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 410992,
+          "contextTokens": 3383,
+          "tokensUsed": 3175599
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 134525,
+          "contextTokens": 403,
+          "tokensUsed": 1327188
+        }
+      ]
+    },
+    {
+      "taskId": "folded-frontmatter-description",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 219937,
+          "contextTokens": 0,
+          "tokensUsed": 3053360
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 320692,
+          "contextTokens": 3383,
+          "tokensUsed": 2403107
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 118986,
+          "contextTokens": 404,
+          "tokensUsed": 1234227
+        }
+      ]
+    }
+  ]
+}

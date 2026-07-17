@@ -7,6 +7,10 @@ semantic versioning.
 ## [Unreleased]
 
 ### Added
+- A measured A/B case study run with headless Claude Code (Sonnet): 4 restored
+  historical bugs, three context conditions, observed success rates and costs.
+  Writeup in `docs/benchmarks/claude-sonnet-2026-07.md`, reproducible fixtures
+  and scrubbed raw results in `examples/measured-bench/`.
 - Subtree-scoped reporting and operational weights for nested `AGENTS.md` and
   `CLAUDE.md` files.
 - Folded and literal multi-line YAML frontmatter value support.

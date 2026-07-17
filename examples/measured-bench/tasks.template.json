@@ -1,0 +1,22 @@
+[
+  {
+    "id": "empty-skill-warning",
+    "baseCommit": "ff061d45f2f17a5b527e14a8530eba00c2ac1253",
+    "prompt": "Bug report: SKILL.md files that contain YAML frontmatter but no instruction body after the closing '---' are supposed to be flagged by the analyzer with a warning (selecting such a skill gives the agent nothing to act on), but no such warning is reported anymore. Find the regression and restore the behavior. The repository's test suite (npm test) currently fails because of this; make it pass. Do not modify or delete any tests."
+  },
+  {
+    "id": "conflict-comments-detection",
+    "baseCommit": "9017a77ed644a15a373a65b3efd218a4df2c41b3",
+    "prompt": "Bug report: when one agent-context file demands code comments everywhere (for example 'Always add comments to every function') and another instruction forbids comments, the analyzer used to report a conflicting-instructions issue about code comments. It no longer does. Restore that conflict detection. The repository's test suite (npm test) currently fails because of this; make it pass. Do not modify or delete any tests."
+  },
+  {
+    "id": "missing-reference-precision",
+    "baseCommit": "331b921da1b5a9f0412e0927914f545e44875b46",
+    "prompt": "Bug report: the missing-path reference detector has lost precision. It now flags obvious placeholder paths such as path/to/example.ts as references to missing files, which floods reports with noise. Placeholder-style paths (path/to/..., foo/bar-style dummies, example placeholders) must not be reported as missing references. The repository's test suite (npm test) currently fails because of this; make it pass. Do not modify or delete any tests."
+  },
+  {
+    "id": "folded-frontmatter-description",
+    "baseCommit": "6e7c9c3550e8a1cf60b2846edffa65ffb008d471",
+    "prompt": "Bug report: SKILL.md frontmatter that uses YAML multi-line description values (folded '>' or literal '|' style) is parsed as an empty value, so those skills are wrongly flagged for having a missing or too-thin description. Multi-line frontmatter values should be joined into the full description text. The repository's test suite (npm test) currently fails because of this; make it pass. Do not modify or delete any tests."
+  }
+]

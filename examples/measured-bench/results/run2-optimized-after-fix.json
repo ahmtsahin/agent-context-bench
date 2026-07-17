@@ -1,0 +1,74 @@
+{
+  "adapter": "command",
+  "generatedAt": "2026-07-17T09:47:51.130Z",
+  "root": "<tmp>/bench-repo",
+  "conditions": [
+    "optimized"
+  ],
+  "tasks": 4,
+  "successRate": {
+    "optimized": 1
+  },
+  "avgContextTokens": {
+    "optimized": 432
+  },
+  "deltas": {
+    "currentVsNone": null,
+    "optimizedVsCurrent": null,
+    "optimizedVsNone": null
+  },
+  "results": [
+    {
+      "taskId": "empty-skill-warning",
+      "conditions": [
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 178825,
+          "contextTokens": 430,
+          "tokensUsed": 2853009
+        }
+      ]
+    },
+    {
+      "taskId": "conflict-comments-detection",
+      "conditions": [
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 165108,
+          "contextTokens": 432,
+          "tokensUsed": 3359923
+        }
+      ]
+    },
+    {
+      "taskId": "missing-reference-precision",
+      "conditions": [
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 233995,
+          "contextTokens": 432,
+          "tokensUsed": 2740834
+        }
+      ]
+    },
+    {
+      "taskId": "folded-frontmatter-description",
+      "conditions": [
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 172337,
+          "contextTokens": 432,
+          "tokensUsed": 1709674
+        }
+      ]
+    }
+  ]
+}

@@ -232,6 +232,18 @@ Measured deltas (success-rate points):
 - optimized vs none: +17
 ```
 
+### A real measured run
+
+We ran the benchmark against this repo with headless Claude Code (Sonnet): 4 real bugs restored from git history, three context conditions, success = the test suite passing afterwards. Full setup, transcript evidence, caveats, and raw results: [docs/benchmarks/claude-sonnet-2026-07.md](docs/benchmarks/claude-sonnet-2026-07.md).
+
+| Condition | Success | Context tokens | Avg time/task | Agent cost |
+| --- | --- | --- | --- | --- |
+| No context | 4/4 | 0 | 186s | $5.13 |
+| Bloated CLAUDE.md (scores 0/100) | 1/4 | ~3,400 | 314s | $6.04 |
+| Optimized context (`--write-optimized`) | 4/4 | ~430 | 188s | $5.01 |
+
+The bloated context — conflicting rules, a package-manager mismatch, references to files that don't exist — cost 75 success points, +69% wall time, and +18% agent spend. The optimized file matched no-context success with 87% fewer tokens than the bloated one. The run also caught a bug in our own generated template (an "ask before network access" rule that stalls headless agents), which is fixed and covered in the writeup.
+
 Each run is recorded to a history store (built-in SQLite, with a JSON Lines fallback) under `.agent-context-bench/history.db`. List past runs with:
 
 ```bash
@@ -290,4 +302,4 @@ Generated reports are ignored by default. Commit only scrubbed example reports i
 - Trend view in the dashboard built from the run history store.
 - Add examples from public repositories.
 
-Done since the first release: scope-aware conflict detection, SKILL.md frontmatter validation, baseline comparison, config file, optional exact tokenizer, PR comments from the GitHub Action, and a measured A/B `run-bench` runner with a SQLite/JSONL run-history store.
+Done since the first release: scope-aware conflict detection, SKILL.md frontmatter validation, baseline comparison, config file, optional exact tokenizer, PR comments from the GitHub Action, a measured A/B `run-bench` runner with a SQLite/JSONL run-history store, and a [measured Claude Code case study](docs/benchmarks/claude-sonnet-2026-07.md) with reproducible fixtures.
