@@ -84,6 +84,43 @@ or wrapped-line fragments.
   only viable path in a no-install workspace, which is exactly the kind of
   environment quirk that stale context rules get wrong.
 
+## Rerun with gold-context metrics (2026-07-20)
+
+After `run-bench` gained gold-context precision/recall/F1 and an efficiency
+score, we rebuilt the four tasks at the then-current HEAD (same procedure,
+fresh orphan snapshots, each base state re-verified to fail exactly its
+covering test) and ran all three conditions again with a stream-json adapter
+(`claude-agent-stream.mjs`) so explored files could be mined from the
+transcript. Raw scrubbed summary:
+[`results/run3-gold-metrics-rerun.json`](../../examples/measured-bench/results/run3-gold-metrics-rerun.json).
+
+| Condition | Success | Ctx tokens | Time/task | Cost (4 tasks) | Efficiency | Edit F1 | Explored precision |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| none | 3/4 | 0 | 175s | $3.89 | 0.75 | 0.92 | 0.41 |
+| current (bloated) | 3/4 | 3,383 | **277s** | **$5.31** | 0.56 | 0.92 | 0.38 |
+| optimized | 2/4 | 432 | 146s | $3.46 | 0.48 | 0.83 | 0.48 |
+
+What the new metrics showed:
+
+- **Every failed cell had the same signature: edit recall 0.5** — the agent
+  fixed `src/index.ts` but never hand-edited the checked-in `dist/index.js`
+  that the tests actually run. The gold-context metric identified the failure
+  mode from the summary alone, with no transcript reading. Every successful
+  cell edited both gold files.
+- **The bloat tax reproduced on time and cost even though success did not
+  drop this time**: +58% wall time and +37% spend vs no context, with two
+  bloated runs grinding through 56–58 agent turns (vs 11–35 elsewhere).
+- **Success-rate deltas at n=4 are noise**: the first run scored bloated
+  context 1/4 and optimized 4/4; this run scored them 3/4 and 2/4. The
+  stable, reproducible signals across both runs are wall time, cost, turn
+  count, and the edit-recall failure signature — one more reason process
+  metrics beat pass/fail at this scale.
+- None of the three conditions told the agent the one thing it needed to
+  hear: *`dist/` is checked in and must be hand-edited because `npm install`
+  is unavailable*. That single missing line cost more success points than
+  any planted conflict — repo-specific environment quirks are exactly what
+  context files are for.
+
 ## Reproducing
 
 Fixtures, the agent wrapper, task prompts, and scrubbed raw results live in

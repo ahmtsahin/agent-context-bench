@@ -14,10 +14,16 @@ Everything used by the July 2026 Claude Code case study
   the prompt from `AGENT_BENCH_PROMPT`/stdin, restricts Bash to test
   commands, emits a `TOKENS=` line from Claude's usage JSON, and appends
   per-run usage/cost records to `$BENCH_LOG`.
+- `claude-agent-stream.mjs` — same, but with `--output-format stream-json`:
+  prints assistant text and tool-use inputs (skipping tool results, whose
+  file contents would pollute the signal) so `run-bench` can mine explored
+  files for the gold-context metrics.
 - `results/run1-all-conditions.json` — raw summary of the first full run
   (none / current / optimized-v1), paths scrubbed.
 - `results/run2-optimized-after-fix.json` — the optimized rerun after the
   template fix, paths scrubbed.
+- `results/run3-gold-metrics-rerun.json` — the 2026-07-20 rerun with
+  gold-context metrics and efficiency scores, paths scrubbed.
 
 Run shape (Windows note: use `C:/...`-style paths inside `--agent`; POSIX
 `/c/...` paths embedded in a composite argument are not converted by git-bash

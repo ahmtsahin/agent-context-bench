@@ -1,0 +1,448 @@
+{
+  "adapter": "command",
+  "generatedAt": "2026-07-20T14:05:57.751Z",
+  "root": "<scratch-repo>",
+  "conditions": [
+    "none",
+    "current",
+    "optimized"
+  ],
+  "tasks": 4,
+  "successRate": {
+    "none": 0.75,
+    "current": 0.75,
+    "optimized": 0.5
+  },
+  "avgContextTokens": {
+    "none": 0,
+    "current": 3383,
+    "optimized": 432
+  },
+  "avgDurationMs": {
+    "none": 174667,
+    "current": 276671,
+    "optimized": 145844
+  },
+  "efficiency": {
+    "none": 0.75,
+    "current": 0.56,
+    "optimized": 0.479
+  },
+  "contextMetrics": {
+    "none": {
+      "tasksWithGold": 4,
+      "editRecall": 0.875,
+      "editPrecision": 1,
+      "editF1": 0.9167,
+      "exploredRecall": 1,
+      "exploredPrecision": 0.4083,
+      "exploredF1": 0.5774
+    },
+    "current": {
+      "tasksWithGold": 4,
+      "editRecall": 0.875,
+      "editPrecision": 1,
+      "editF1": 0.9167,
+      "exploredRecall": 0.875,
+      "exploredPrecision": 0.3797,
+      "exploredF1": 0.504
+    },
+    "optimized": {
+      "tasksWithGold": 4,
+      "editRecall": 0.75,
+      "editPrecision": 1,
+      "editF1": 0.8334,
+      "exploredRecall": 0.75,
+      "exploredPrecision": 0.475,
+      "exploredF1": 0.5595
+    }
+  },
+  "deltas": {
+    "currentVsNone": 0,
+    "optimizedVsCurrent": -25,
+    "optimizedVsNone": -25
+  },
+  "results": [
+    {
+      "taskId": "empty-skill-warning",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 179984,
+          "contextTokens": 0,
+          "tokensUsed": 1616856,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.4,
+            "exploredF1": 0.5714
+          }
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 206955,
+          "contextTokens": 3383,
+          "tokensUsed": 1860439,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.4,
+            "exploredF1": 0.5714
+          }
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 157781,
+          "contextTokens": 430,
+          "tokensUsed": 2125067,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "CLAUDE.md",
+              "dist/index.js",
+              "src/index.ts",
+              "test/analyzer.test.mjs"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.5,
+            "exploredF1": 0.6667
+          }
+        }
+      ]
+    },
+    {
+      "taskId": "conflict-comments-detection",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 192349,
+          "contextTokens": 0,
+          "tokensUsed": 1983896,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.d.ts",
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.3333,
+            "exploredF1": 0.5
+          }
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 398557,
+          "contextTokens": 3383,
+          "tokensUsed": 4452780,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "CLAUDE.md",
+              "dist/index.js",
+              "dist/index.js.map",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.2857,
+            "exploredF1": 0.4444
+          }
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 102890,
+          "contextTokens": 432,
+          "tokensUsed": 913585,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "src/index.ts",
+              "test/analyzer.test.mjs"
+            ],
+            "editRecall": 0.5,
+            "editPrecision": 1,
+            "editF1": 0.6667,
+            "exploredRecall": 0.5,
+            "exploredPrecision": 0.5,
+            "exploredF1": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "taskId": "missing-reference-precision",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 115243,
+          "contextTokens": 0,
+          "tokensUsed": 1401220,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs"
+            ],
+            "editRecall": 0.5,
+            "editPrecision": 1,
+            "editF1": 0.6667,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.5,
+            "exploredF1": 0.6667
+          }
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 395956,
+          "contextTokens": 3383,
+          "tokensUsed": 3863553,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.d.ts",
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.3333,
+            "exploredF1": 0.5
+          }
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 254112,
+          "contextTokens": 432,
+          "tokensUsed": 2592375,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.4,
+            "exploredF1": 0.5714
+          }
+        }
+      ]
+    },
+    {
+      "taskId": "folded-frontmatter-description",
+      "conditions": [
+        {
+          "condition": "none",
+          "adapterOk": true,
+          "success": true,
+          "durationMs": 211093,
+          "contextTokens": 0,
+          "tokensUsed": 2234218,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "dist/index.js",
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "dist/index.js",
+              "package.json",
+              "src/index.ts",
+              "test/analyzer.test.mjs",
+              "tsconfig.json"
+            ],
+            "editRecall": 1,
+            "editPrecision": 1,
+            "editF1": 1,
+            "exploredRecall": 1,
+            "exploredPrecision": 0.4,
+            "exploredF1": 0.5714
+          }
+        },
+        {
+          "condition": "current",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 105215,
+          "contextTokens": 3383,
+          "tokensUsed": 880315,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "src/index.ts",
+              "test/analyzer.test.mjs"
+            ],
+            "editRecall": 0.5,
+            "editPrecision": 1,
+            "editF1": 0.6667,
+            "exploredRecall": 0.5,
+            "exploredPrecision": 0.5,
+            "exploredF1": 0.5
+          }
+        },
+        {
+          "condition": "optimized",
+          "adapterOk": true,
+          "success": false,
+          "durationMs": 68591,
+          "contextTokens": 432,
+          "tokensUsed": 732979,
+          "contextMetrics": {
+            "goldFiles": [
+              "src/index.ts",
+              "dist/index.js"
+            ],
+            "editedFiles": [
+              "src/index.ts"
+            ],
+            "exploredFiles": [
+              "src/index.ts",
+              "test/analyzer.test.mjs"
+            ],
+            "editRecall": 0.5,
+            "editPrecision": 1,
+            "editF1": 0.6667,
+            "exploredRecall": 0.5,
+            "exploredPrecision": 0.5,
+            "exploredF1": 0.5
+          }
+        }
+      ]
+    }
+  ]
+}
