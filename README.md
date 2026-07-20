@@ -9,6 +9,13 @@ Put your `AGENTS.md` and `SKILL.md` files on a diet. Every line of agent context
 
 `agent-context-bench` is a dependency-light CLI for auditing repository-level agent instructions: `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `.cursor/rules`, `.cursorrules`, and `.github/copilot-instructions.md`. It estimates the token footprint of each file (with an optional exact tokenizer), breaks the cost down per skill, separates context that loads on **every** task from skills that load only when selected, and flags the bloat, duplication, and conflicts that drive that cost up. Run the [A/B benchmark](#measured-ab-benchmark) to turn those estimates into measured success rates and token counts.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/img/overview-dark.svg">
+    <img src="./docs/img/overview-light.svg" alt="Pipeline: agent context files flow into free static analysis (scores, issue flags, an optimized AGENTS.md) and then into run-bench, which measures success rates, gold-context precision/recall, tokens, cost, and efficiency." width="880">
+  </picture>
+</p>
+
 ## Quick Start
 
 Requires Node.js 20 or newer.
@@ -260,6 +267,13 @@ Each condition also gets `efficiency = successRate / (1 + contextTokens / 10000)
 ### A real measured run
 
 We ran the benchmark against this repo with headless Claude Code (Sonnet): 4 real bugs restored from git history, three context conditions, success = the test suite passing afterwards. Full setup, transcript evidence, caveats, and raw results: [docs/benchmarks/claude-sonnet-2026-07.md](docs/benchmarks/claude-sonnet-2026-07.md).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/img/bench-run1-dark.svg">
+    <img src="./docs/img/bench-run1-light.svg" alt="Measured results: bloated context scored 1/4 task success at 314 seconds and $6.04 per condition, while no context and the optimized context both scored 4/4 at about 187 seconds and $5 — the bloat cost 75 success points, 69% more wall time, and 18% more spend." width="880">
+  </picture>
+</p>
 
 | Condition | Success | Context tokens | Avg time/task | Agent cost |
 | --- | --- | --- | --- | --- |
