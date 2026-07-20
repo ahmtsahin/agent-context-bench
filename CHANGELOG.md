@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows
 semantic versioning.
 
+## [Unreleased]
+
+### Added
+- Gold-context metrics in `run-bench`, inspired by ContextBench's
+  process-oriented evaluation: each task's source-commit files act as the gold
+  context, agent edits are read from the workspace's git status, and explored
+  files add workspace files mentioned in the agent output. The summary reports
+  per-condition file-level precision/recall/F1 for edits and exploration.
+- An efficiency score per bench condition
+  (`successRate / (1 + contextTokens / 10k)`) plus average task duration, so
+  conditions can be compared on success per unit of context pressure.
+- `generate-bench --verify`: keeps only tasks whose success command fails at
+  the base commit and passes at the target commit, the same vetting idea as
+  ContextBench's Verified subset. Verified tasks carry `"verified": true`.
+
 ## [0.4.1]
 
 ### Added

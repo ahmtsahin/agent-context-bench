@@ -26,9 +26,13 @@ export function runBench(rootInput, options) {
             const workspace = prepareWorkspace(root, task, condition, baseDir);
             try {
                 const contextTokens = applyCondition(workspace, condition);
+                // Snapshot the files the condition setup already touched (removed or
+                // rewritten context files) so they do not count as agent edits.
+                const preDirty = gitDirtyFiles(workspace);
                 const start = Date.now();
                 const run = options.adapter.run({ prompt: task.prompt, workspace, condition, timeoutMs });
                 const durationMs = Date.now() - start;
+                const contextMetrics = collectContextMetrics(task, workspace, preDirty, run.output);
                 const verification = runSuccessCommand(workspace, task.successCommand ?? successCommand, timeoutMs);
                 conditionResults.push({
                     condition,
@@ -37,6 +41,7 @@ export function runBench(rootInput, options) {
                     durationMs,
                     contextTokens,
                     tokensUsed: run.tokensUsed,
+                    contextMetrics,
                     note: combineNotes(run.ok ? undefined : `agent command failed${run.exitCode === undefined ? "" : ` (exit ${run.exitCode})`}`, verification.note)
                 });
             }
@@ -105,13 +110,104 @@ export function commandAdapter(command, name = "command") {
         }
     };
 }
+// Vet generated tasks the way ContextBench vets its Verified subset: a task
+// only counts when the success command fails at the base commit (the bug is
+// really present, so an agent cannot pass by doing nothing) and passes at the
+// target commit (the historical fix really solves it).
+export function verifyBenchTasks(rootInput, tasks, options = {}) {
+    const root = path.resolve(rootInput);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const successCommand = options.successCommand ?? inferRepoSignals(root).commands.test;
+    const log = options.onProgress ?? (() => { });
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "acb-verify-"));
+    const verifications = [];
+    try {
+        for (const task of tasks) {
+            verifications.push(verifyTask(root, task, successCommand, timeoutMs, baseDir, log));
+        }
+    }
+    finally {
+        try {
+            fs.rmSync(baseDir, { recursive: true, force: true });
+        }
+        catch {
+            // Best-effort cleanup of the temp verification root.
+        }
+    }
+    return verifications;
+}
+function verifyTask(root, task, successCommand, timeoutMs, baseDir, log) {
+    const unverified = (note) => {
+        log(`verify ${task.id}: skipped (${note})`);
+        return { taskId: task.id, baseFails: null, targetPasses: null, verified: false, note };
+    };
+    if (!successCommand) {
+        return unverified("no success command (pass --success or expose a test script)");
+    }
+    if (!task.baseCommit || !task.targetCommit) {
+        return unverified("task lacks baseCommit/targetCommit");
+    }
+    if (!isGitRepo(root)) {
+        return unverified("not a git repository");
+    }
+    const workspace = path.join(baseDir, sanitize(task.id));
+    fs.rmSync(workspace, { recursive: true, force: true });
+    try {
+        execFileSync("git", ["worktree", "add", "--force", "--detach", workspace, task.baseCommit], {
+            cwd: root,
+            stdio: "ignore"
+        });
+    }
+    catch {
+        return unverified(`could not create a worktree at ${task.baseCommit}`);
+    }
+    try {
+        const base = runSuccessCommand(workspace, successCommand, timeoutMs);
+        const baseFails = !base.success;
+        let targetPasses = null;
+        try {
+            execFileSync("git", ["checkout", "--force", "--detach", task.targetCommit], { cwd: workspace, stdio: "ignore" });
+            targetPasses = runSuccessCommand(workspace, successCommand, timeoutMs).success;
+        }
+        catch {
+            return { taskId: task.id, baseFails, targetPasses: null, verified: false, note: `could not checkout ${task.targetCommit}` };
+        }
+        const verified = baseFails && targetPasses;
+        const note = verified
+            ? undefined
+            : !baseFails
+                ? "success command already passes at the base commit"
+                : "success command fails at the target commit";
+        log(`verify ${task.id}: base ${baseFails ? "fails" : "passes"}, target ${targetPasses ? "passes" : "fails"}${verified ? "" : " -> dropped"}`);
+        return { taskId: task.id, baseFails, targetPasses, verified, note };
+    }
+    finally {
+        cleanupWorkspace(root, workspace);
+    }
+}
 function summarize(root, adapter, conditions, results) {
     const successRate = {};
     const avgContextTokens = {};
+    const avgDurationMs = {};
+    const efficiency = {};
+    const contextMetrics = {};
     for (const condition of conditions) {
         const rows = results.map((result) => result.conditions.find((entry) => entry.condition === condition)).filter(Boolean);
         successRate[condition] = rows.length === 0 ? 0 : round(rows.filter((row) => row.success).length / rows.length, 4);
         avgContextTokens[condition] = rows.length === 0 ? 0 : Math.round(rows.reduce((sum, row) => sum + row.contextTokens, 0) / rows.length);
+        avgDurationMs[condition] = rows.length === 0 ? 0 : Math.round(rows.reduce((sum, row) => sum + row.durationMs, 0) / rows.length);
+        efficiency[condition] =
+            rows.length === 0 ? null : round(successRate[condition] / (1 + avgContextTokens[condition] / 10_000), 3);
+        const metricRows = rows.map((row) => row.contextMetrics).filter(Boolean);
+        contextMetrics[condition] = {
+            tasksWithGold: metricRows.length,
+            editRecall: averageMetric(metricRows.map((row) => row.editRecall)),
+            editPrecision: averageMetric(metricRows.map((row) => row.editPrecision)),
+            editF1: averageMetric(metricRows.map((row) => row.editF1)),
+            exploredRecall: averageMetric(metricRows.map((row) => row.exploredRecall)),
+            exploredPrecision: averageMetric(metricRows.map((row) => row.exploredPrecision)),
+            exploredF1: averageMetric(metricRows.map((row) => row.exploredF1))
+        };
     }
     const delta = (a, b) => successRate[a] === undefined || successRate[b] === undefined ? null : round((successRate[a] - successRate[b]) * 100, 2);
     return {
@@ -122,6 +218,9 @@ function summarize(root, adapter, conditions, results) {
         tasks: results.length,
         successRate,
         avgContextTokens,
+        avgDurationMs,
+        efficiency,
+        contextMetrics,
         deltas: {
             currentVsNone: delta("current", "none"),
             optimizedVsCurrent: delta("optimized", "current"),
@@ -129,6 +228,131 @@ function summarize(root, adapter, conditions, results) {
         },
         results
     };
+}
+function averageMetric(values) {
+    const present = values.filter((value) => value !== null && value !== undefined);
+    return present.length === 0 ? null : round(present.reduce((sum, value) => sum + value, 0) / present.length, 4);
+}
+// Gold files come from the task's source commit; edited files from git status;
+// explored files add workspace files mentioned in the agent's output. Metrics
+// stay undefined when the task has no gold files or the workspace is not a git
+// worktree (the plain-copy fallback), so estimates never masquerade as data.
+function collectContextMetrics(task, workspace, preDirty, agentOutput) {
+    const goldFiles = (task.filesChanged ?? []).map(normalizeRepoPath).filter((file) => file.length > 0);
+    if (goldFiles.length === 0 || preDirty === null) {
+        return undefined;
+    }
+    const postDirty = gitDirtyFiles(workspace);
+    if (postDirty === null) {
+        return undefined;
+    }
+    const editedFiles = [...postDirty].filter((file) => !preDirty.has(file)).sort();
+    const mentioned = extractMentionedFiles(agentOutput, workspace);
+    const exploredFiles = [...new Set([...editedFiles, ...mentioned])].sort();
+    const edit = precisionRecall(goldFiles, editedFiles);
+    const explored = precisionRecall(goldFiles, exploredFiles);
+    return {
+        goldFiles,
+        editedFiles,
+        exploredFiles,
+        editRecall: edit.recall,
+        editPrecision: edit.precision,
+        editF1: edit.f1,
+        exploredRecall: explored.recall,
+        exploredPrecision: explored.precision,
+        exploredF1: explored.f1
+    };
+}
+function precisionRecall(gold, predicted) {
+    const goldSet = new Set(gold);
+    const hits = predicted.filter((file) => goldSet.has(file)).length;
+    const recall = gold.length === 0 ? null : round(hits / gold.length, 4);
+    const precision = predicted.length === 0 ? null : round(hits / predicted.length, 4);
+    if (recall === null || precision === null) {
+        return { recall, precision, f1: null };
+    }
+    const f1 = precision + recall === 0 ? 0 : round((2 * precision * recall) / (precision + recall), 4);
+    return { recall, precision, f1 };
+}
+// Workspace-relative paths of files git considers modified, added, deleted, or
+// untracked. Returns null when the workspace is not a git checkout.
+function gitDirtyFiles(workspace) {
+    let raw = "";
+    try {
+        raw = execFileSync("git", ["status", "--porcelain"], {
+            cwd: workspace,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"]
+        });
+    }
+    catch {
+        return null;
+    }
+    const files = new Set();
+    for (const line of raw.split("\n")) {
+        if (line.trim().length === 0) {
+            continue;
+        }
+        let value = line.slice(3);
+        const arrow = value.indexOf(" -> ");
+        if (arrow >= 0) {
+            value = value.slice(arrow + 4);
+        }
+        files.add(normalizeRepoPath(unquoteGitPath(value)));
+    }
+    return files;
+}
+function unquoteGitPath(value) {
+    if (value.length >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+        return value.slice(1, -1).replace(/\\(["\\tn])/g, (_, char) => (char === "t" ? "\t" : char === "n" ? "\n" : char));
+    }
+    return value;
+}
+const MENTIONED_FILE_REGEX = /[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.[A-Za-z0-9]{1,8}\b/g;
+const MAX_MENTIONED_FILES = 500;
+// Best-effort scan of the agent's stdout/stderr for workspace files it talked
+// about. Catches plain path mentions and the file_path fields of structured
+// transcript formats such as Claude Code's stream-json output.
+function extractMentionedFiles(output, workspace) {
+    let normalizedOutput = output.replace(/\\+/g, "/");
+    const workspacePrefix = `${workspace.replace(/\\+/g, "/").replace(/\/+$/, "")}/`;
+    // Absolute mentions become workspace-relative before matching; the path
+    // regex cannot cross drive-letter colons, so the prefix is stripped first.
+    for (const prefix of workspacePrefixVariants(workspacePrefix)) {
+        normalizedOutput = normalizedOutput.split(prefix).join(" ");
+    }
+    const files = new Set();
+    for (const raw of normalizedOutput.match(MENTIONED_FILE_REGEX) ?? []) {
+        if (files.size >= MAX_MENTIONED_FILES) {
+            break;
+        }
+        const candidate = raw.replace(/^\.\/+/, "");
+        if (candidate.length === 0 || candidate.includes("..") || path.isAbsolute(candidate) || files.has(candidate)) {
+            continue;
+        }
+        try {
+            if (fs.statSync(path.join(workspace, candidate)).isFile()) {
+                files.add(candidate);
+            }
+        }
+        catch {
+            // Mentioned string is not a real workspace file; skip it.
+        }
+    }
+    return [...files].sort();
+}
+function workspacePrefixVariants(prefix) {
+    const variants = [prefix];
+    const drive = prefix.match(/^([A-Za-z]):\//);
+    if (drive) {
+        const letter = drive[1];
+        const toggled = letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase();
+        variants.push(`${toggled}${prefix.slice(1)}`);
+    }
+    return variants;
+}
+function normalizeRepoPath(value) {
+    return value.replace(/\\+/g, "/").replace(/^\.\/+/, "").trim();
 }
 function prepareWorkspace(root, task, condition, baseDir) {
     const workspace = path.join(baseDir, `${sanitize(task.id)}__${condition}`);

@@ -149,6 +149,7 @@ export interface GeneratedBenchTask {
   prompt: string;
   filesChanged: string[];
   successCriteria: string[];
+  verified?: boolean;
 }
 
 const DEFAULT_MAX_LINES = 350;

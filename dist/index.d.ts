@@ -130,6 +130,7 @@ export interface GeneratedBenchTask {
     prompt: string;
     filesChanged: string[];
     successCriteria: string[];
+    verified?: boolean;
 }
 export declare function analyzeRepo(rootInput?: string, options?: AnalyzeOptions): AnalysisResult;
 export declare function discoverContextFiles(rootInput?: string, options?: AnalyzeOptions): ContextFile[];

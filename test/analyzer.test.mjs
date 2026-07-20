@@ -13,7 +13,8 @@ import {
   renderBaselineComparison,
   renderDashboardReports,
   renderReport,
-  runBench
+  runBench,
+  verifyBenchTasks
 } from "../dist/index.js";
 
 const NOOP_COMMAND = 'node -e "process.exit(0)"';
@@ -608,4 +609,132 @@ test("cli prints help", () => {
   assert.match(output, /agent-context-bench/);
   assert.match(output, /--write-optimized/);
   assert.match(output, /dashboard/);
+  assert.match(output, /--verify/);
+});
+
+test("bench computes gold-context metrics from workspace edits and output mentions", () => {
+  const root = tempRepo();
+  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });
+  git("init");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, "value.txt"), "1\n");
+  fs.writeFileSync(path.join(root, "helper.txt"), "h\n");
+  git("add", ".");
+  git("commit", "-m", "init");
+
+  const adapter = {
+    name: "editor",
+    run({ workspace }) {
+      fs.writeFileSync(path.join(workspace, "value.txt"), "2\n");
+      return { ok: true, output: "I inspected helper.txt and edited value.txt to fix the bug." };
+    }
+  };
+  const summary = runBench(root, {
+    adapter,
+    tasks: [{ id: "task-1", prompt: "fix the value", filesChanged: ["value.txt"] }],
+    conditions: ["none"],
+    successCommand: NOOP_COMMAND
+  });
+
+  const metrics = summary.results[0].conditions[0].contextMetrics;
+  assert.deepEqual(metrics.goldFiles, ["value.txt"]);
+  assert.deepEqual(metrics.editedFiles, ["value.txt"]);
+  assert.deepEqual(metrics.exploredFiles, ["helper.txt", "value.txt"]);
+  assert.equal(metrics.editRecall, 1);
+  assert.equal(metrics.editPrecision, 1);
+  assert.equal(metrics.editF1, 1);
+  assert.equal(metrics.exploredRecall, 1);
+  assert.equal(metrics.exploredPrecision, 0.5);
+
+  assert.equal(summary.contextMetrics.none.tasksWithGold, 1);
+  assert.equal(summary.contextMetrics.none.editF1, 1);
+  assert.equal(summary.efficiency.none, 1);
+  assert.ok(summary.avgDurationMs.none >= 0);
+});
+
+test("bench leaves gold-context metrics undefined without gold files", () => {
+  const root = tempRepo();
+  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: root, stdio: ["ignore", "ignore", "ignore"] });
+  git("init");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, "value.txt"), "1\n");
+  git("add", ".");
+  git("commit", "-m", "init");
+
+  const summary = runBench(root, {
+    adapter: commandAdapter(NOOP_COMMAND),
+    tasks: [{ id: "task-1", prompt: "noop" }],
+    conditions: ["none"],
+    successCommand: NOOP_COMMAND
+  });
+
+  assert.equal(summary.results[0].conditions[0].contextMetrics, undefined);
+  assert.equal(summary.contextMetrics.none.tasksWithGold, 0);
+  assert.equal(summary.contextMetrics.none.editF1, null);
+});
+
+function fixtureRepoWithFixHistory() {
+  const root = tempRepo();
+  const git = (...gitArgs) =>
+    execFileSync("git", gitArgs, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  git("init");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(
+    path.join(root, "check.mjs"),
+    'import fs from "node:fs";\nprocess.exit(fs.readFileSync("value.txt", "utf8").trim() === "2" ? 0 : 1);\n'
+  );
+  fs.writeFileSync(path.join(root, "value.txt"), "1\n");
+  git("add", ".");
+  git("commit", "-m", "init");
+  fs.writeFileSync(path.join(root, "value.txt"), "2\n");
+  git("add", ".");
+  git("commit", "-m", "Fix counter value");
+  const fixHash = git("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(root, "notes.txt"), "n\n");
+  git("add", ".");
+  git("commit", "-m", "Fix docs note");
+  const docsHash = git("rev-parse", "HEAD");
+  return { root, fixHash, docsHash };
+}
+
+test("verifyBenchTasks separates real fixes from tasks that pass without work", () => {
+  const { root, fixHash, docsHash } = fixtureRepoWithFixHistory();
+
+  const results = verifyBenchTasks(
+    root,
+    [
+      { id: "real-fix", prompt: "p", baseCommit: `${fixHash}^`, targetCommit: fixHash },
+      { id: "already-passing", prompt: "p", baseCommit: `${docsHash}^`, targetCommit: docsHash },
+      { id: "no-commits", prompt: "p" }
+    ],
+    { successCommand: "node check.mjs" }
+  );
+
+  const byId = new Map(results.map((entry) => [entry.taskId, entry]));
+  assert.equal(byId.get("real-fix").baseFails, true);
+  assert.equal(byId.get("real-fix").targetPasses, true);
+  assert.equal(byId.get("real-fix").verified, true);
+  assert.equal(byId.get("already-passing").baseFails, false);
+  assert.equal(byId.get("already-passing").verified, false);
+  assert.match(byId.get("already-passing").note, /already passes/);
+  assert.equal(byId.get("no-commits").verified, false);
+  assert.match(byId.get("no-commits").note, /baseCommit/);
+});
+
+test("cli generate-bench --verify keeps only verified tasks", () => {
+  const { root } = fixtureRepoWithFixHistory();
+
+  const output = execFileSync(
+    "node",
+    [path.resolve("dist/cli.js"), "generate-bench", root, "--verify", "--success", "node check.mjs"],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+  const payload = JSON.parse(output);
+
+  assert.equal(payload.tasks.length, 1);
+  assert.match(payload.tasks[0].title, /Fix counter value/);
+  assert.equal(payload.tasks[0].verified, true);
 });

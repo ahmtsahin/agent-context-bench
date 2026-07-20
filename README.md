@@ -202,6 +202,14 @@ agent-context-bench generate-bench --from-git-history --limit 20 --output .agent
 
 The generated tasks identify small historical commits that look like bug fixes, validation fixes, tests, or refactors. They do not mutate the repo; they produce task metadata that the `run-bench` command can execute.
 
+Add `--verify` to vet each candidate before it enters the suite:
+
+```bash
+agent-context-bench generate-bench --from-git-history --verify --success "npm test" --output .agent-context-bench/tasks.json
+```
+
+A task is kept only when the success command **fails at the base commit** (the bug is really present, so an agent cannot pass by doing nothing) and **passes at the target commit** (the historical fix really solves it). Kept tasks carry `"verified": true`; dropped tasks are logged with the reason. This runs the success command twice per task in an isolated worktree, so it costs test time but removes the noisiest failure mode of history-mined benchmarks: tasks that were never actually broken.
+
 ## Measured A/B benchmark
 
 `run-bench` turns the static estimates into measured results. It runs each task three ways — with **no** context, the **current** context, and the **optimized** context — and records whether the success command passes in each case. Success is observed (the exit status of your success command after the agent runs), not estimated.
@@ -223,14 +231,31 @@ Example output:
 ```text
 Bench summary (adapter: command)
 - Tasks: 12
-- none: 58% success, ~0 context tokens
-- current: 50% success, ~21000 context tokens
-- optimized: 75% success, ~5200 context tokens
+- none: 58% success, ~0 context tokens, efficiency 0.58, 186s/task
+- current: 50% success, ~21000 context tokens, efficiency 0.16, 314s/task
+- optimized: 75% success, ~5200 context tokens, efficiency 0.49, 188s/task
 Measured deltas (success-rate points):
 - current vs none: -8
 - optimized vs current: +25
 - optimized vs none: +17
+Gold-context metrics (vs files changed by each task's source commit):
+- none: edit P/R/F1 0.71/0.66/0.68, explored P/R 0.31/0.83 (12 tasks with gold files)
+- current: edit P/R/F1 0.52/0.58/0.55, explored P/R 0.18/0.79 (12 tasks with gold files)
+- optimized: edit P/R/F1 0.74/0.70/0.72, explored P/R 0.33/0.85 (12 tasks with gold files)
 ```
+
+### Gold-context metrics
+
+Tasks generated from git history carry the files their source commit touched. `run-bench` treats those files as the task's **gold context** (the ContextBench idea, without needing human annotation) and measures, per condition:
+
+- **Edited files**: read from `git status` in the task worktree after the agent runs, minus the context files the condition setup itself changed. Edit precision/recall/F1 tell you whether the agent changed the right files.
+- **Explored files**: edited files plus workspace files the agent's output mentioned (plain path mentions and `file_path` fields in structured transcripts both match). Explored precision is a best-effort proxy for how much irrelevant wandering the context caused.
+
+Metrics stay `null` when a task has no `filesChanged` or the workspace fell back to a plain copy instead of a git worktree — estimates never masquerade as measurements. The exploration signal depends on how verbose your agent's output is; edit metrics are exact.
+
+### Efficiency
+
+Each condition also gets `efficiency = successRate / (1 + contextTokens / 10000)` — success per unit of context pressure. Two conditions with equal success rates rank by token cost; a condition that buys no success with extra tokens sinks. It is a comparison score between conditions of one run, not a cross-project benchmark number.
 
 ### A real measured run
 
@@ -302,4 +327,4 @@ Generated reports are ignored by default. Commit only scrubbed example reports i
 - Trend view in the dashboard built from the run history store.
 - Add examples from public repositories.
 
-Done since the first release: scope-aware conflict detection, SKILL.md frontmatter validation, baseline comparison, config file, optional exact tokenizer, PR comments from the GitHub Action, a measured A/B `run-bench` runner with a SQLite/JSONL run-history store, and a [measured Claude Code case study](docs/benchmarks/claude-sonnet-2026-07.md) with reproducible fixtures.
+Done since the first release: scope-aware conflict detection, SKILL.md frontmatter validation, baseline comparison, config file, optional exact tokenizer, PR comments from the GitHub Action, a measured A/B `run-bench` runner with a SQLite/JSONL run-history store, a [measured Claude Code case study](docs/benchmarks/claude-sonnet-2026-07.md) with reproducible fixtures, gold-context precision/recall/F1 metrics and an efficiency score in `run-bench`, and `generate-bench --verify` task vetting.

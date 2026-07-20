@@ -20,6 +20,7 @@ import {
   type DashboardReportInput,
   type ReportFormat,
   type SerializableAnalysisResult,
+  verifyBenchTasks,
   writeOptimizedAgents
 } from "./index.js";
 
@@ -43,6 +44,7 @@ interface ParsedArgs {
   timeout?: number;
   historyFile?: string;
   noHistory?: boolean;
+  verify?: boolean;
 }
 
 interface BenchConfig {
@@ -68,7 +70,20 @@ export function main(argv = process.argv.slice(2)): number {
   const root = path.resolve(args.target);
 
   if (args.command === "generate-bench") {
-    const tasks = generateBenchFromGitHistory(root, { limit: args.limit });
+    let tasks = generateBenchFromGitHistory(root, { limit: args.limit });
+    if (args.verify && tasks.length > 0) {
+      const verifications = verifyBenchTasks(root, tasks, {
+        successCommand: args.success,
+        timeoutMs: args.timeout,
+        onProgress: (message) => console.error(message)
+      });
+      const byId = new Map(verifications.map((entry) => [entry.taskId, entry]));
+      const total = tasks.length;
+      tasks = tasks
+        .filter((task) => byId.get(task.id)?.verified)
+        .map((task) => ({ ...task, verified: true }));
+      console.error(`Verified ${tasks.length}/${total} tasks (base commit fails, target commit passes).`);
+    }
     const payload = JSON.stringify({ root, tasks }, null, 2);
     if (args.output) {
       writeFile(root, args.output, payload);
@@ -230,13 +245,47 @@ function renderBenchSummary(summary: BenchSummary): string {
   lines.push(`- Tasks: ${summary.tasks}`);
   for (const condition of summary.conditions) {
     const rate = Math.round((summary.successRate[condition] ?? 0) * 100);
-    lines.push(`- ${condition}: ${rate}% success, ~${summary.avgContextTokens[condition] ?? 0} context tokens`);
+    const parts = [`${rate}% success`, `~${summary.avgContextTokens[condition] ?? 0} context tokens`];
+    const efficiency = summary.efficiency?.[condition];
+    if (efficiency !== null && efficiency !== undefined) {
+      parts.push(`efficiency ${efficiency.toFixed(2)}`);
+    }
+    const duration = summary.avgDurationMs?.[condition];
+    if (duration) {
+      parts.push(`${Math.round(duration / 1000)}s/task`);
+    }
+    lines.push(`- ${condition}: ${parts.join(", ")}`);
   }
   lines.push("Measured deltas (success-rate points):");
   lines.push(`- current vs none: ${formatDelta(summary.deltas.currentVsNone)}`);
   lines.push(`- optimized vs current: ${formatDelta(summary.deltas.optimizedVsCurrent)}`);
   lines.push(`- optimized vs none: ${formatDelta(summary.deltas.optimizedVsNone)}`);
+  const metricLines = renderContextMetrics(summary);
+  if (metricLines.length > 0) {
+    lines.push("Gold-context metrics (vs files changed by each task's source commit):");
+    lines.push(...metricLines);
+  }
   return lines.join("\n");
+}
+
+function renderContextMetrics(summary: BenchSummary): string[] {
+  const lines: string[] = [];
+  for (const condition of summary.conditions) {
+    const metrics = summary.contextMetrics?.[condition];
+    if (!metrics || metrics.tasksWithGold === 0) {
+      continue;
+    }
+    lines.push(
+      `- ${condition}: edit P/R/F1 ${formatMetric(metrics.editPrecision)}/${formatMetric(metrics.editRecall)}/${formatMetric(metrics.editF1)}, ` +
+        `explored P/R ${formatMetric(metrics.exploredPrecision)}/${formatMetric(metrics.exploredRecall)} ` +
+        `(${metrics.tasksWithGold} task${metrics.tasksWithGold === 1 ? "" : "s"} with gold files)`
+    );
+  }
+  return lines;
+}
+
+function formatMetric(value: number | null): string {
+  return value === null || value === undefined ? "-" : value.toFixed(2);
 }
 
 function renderHistory(rows: HistoryRecord[], backend: string): string {
@@ -435,6 +484,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       parsed.historyFile = arg.slice("--history-file=".length);
     } else if (arg === "--no-history") {
       parsed.noHistory = true;
+    } else if (arg === "--verify") {
+      parsed.verify = true;
     } else if (arg === "--from-git-history") {
       // Accepted for readability: generate-bench already uses git history.
     } else if (arg.startsWith("-")) {
@@ -561,7 +612,7 @@ function helpText(): string {
     "Usage:",
     "  agent-context-bench [path] [options]",
     "  context-diet [path] [options]",
-    "  agent-context-bench generate-bench [path] --from-git-history [options]",
+    "  agent-context-bench generate-bench [path] --from-git-history [--verify --success \"<cmd>\"]",
     "  agent-context-bench dashboard [json-file-or-report-dir] -o dashboard.html",
     "  agent-context-bench run-bench [path] --agent \"<cmd>\" [--tasks file.json] [--success \"<cmd>\"]",
     "  agent-context-bench history [path] [--limit n] [--format json]",
@@ -577,6 +628,8 @@ function helpText(): string {
     "  --baseline <file.json>           Compare scores against a previous JSON report",
     "  --exact-tokens                   Use the optional gpt-tokenizer for exact token counts",
     "  --limit <n>                      Bench task limit for generate-bench/history",
+    "  --verify                         generate-bench: keep only tasks whose success command",
+    "                                   fails at the base commit and passes at the target commit",
     "  --agent <cmd>                    run-bench: agent CLI to invoke per task",
     "  --tasks <file.json>              run-bench: task list (default: from git history)",
     "  --success <cmd>                  run-bench: success command (default: repo test script)",
