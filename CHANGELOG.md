@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows
 semantic versioning.
 
-## [Unreleased]
+## [0.5.0]
 
 ### Added
 - Gold-context metrics in `run-bench`, inspired by ContextBench's
@@ -18,6 +18,11 @@ semantic versioning.
 - `generate-bench --verify`: keeps only tasks whose success command fails at
   the base commit and passes at the target commit, the same vetting idea as
   ContextBench's Verified subset. Verified tasks carry `"verified": true`.
+- A rerun of the measured case study with the new metrics
+  (`examples/measured-bench/results/run3-gold-metrics-rerun.json`) and a
+  stream-json Claude Code adapter that exposes explored files to the metrics.
+- Pipeline and measured-results figures in the README, in light and dark
+  variants.
 
 ## [0.4.1]
 
