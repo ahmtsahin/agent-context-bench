@@ -54,7 +54,7 @@ jobs:
             }
           '
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
-          gh release view "$RELEASE_TAG" >/dev/null
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
           package_name="$(node --print "require('./package.json').name")"
           package_version="$(node --print "require('./package.json').version")"
           published_version="$(npm view "$package_name@$package_version" version --silent)"
@@ -96,7 +96,7 @@ jobs:
             echo "::error::$RELEASE_TAG moved after verification; refusing to update v1."
             exit 1
           fi
-          gh release view "$RELEASE_TAG" >/dev/null
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
 
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1" >/dev/null 2>&1; then
             gh api --method PATCH \
