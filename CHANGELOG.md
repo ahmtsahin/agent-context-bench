@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows
 semantic versioning.
 
+## [0.6.0]
+
+### Breaking changes
+- Static audit results now include `status`, use nullable `score` and
+  `inventoryScore`, and report categorical `signals` instead of synthetic
+  causal percentage fields. Empty placeholder files are not treated as a
+  perfect configured inventory.
+- `inventoryRiskScore` was renamed to `inventoryScore`. The CLI still reads
+  legacy 0.5 baselines and dashboards; programmatic baseline comparison accepts
+  either name during migration.
+
+### Added
+- Preferred `generateAgentsCandidate` and `writeAgentsCandidate` APIs. The old
+  optimized-named functions remain deprecated aliases; unconfigured repos
+  default to a reviewable `AGENTS.starter.md`.
+- Node 20/22/24, Windows, checked-in `dist`, packed-package, and local Action
+  CI coverage; tag-driven npm provenance/GitHub Release automation; and a
+  separately approved workflow for promoting the floating Action `v1` tag.
+- Contribution, security, conduct, API, CLI, metric, Action, release, and live
+  roadmap documentation, plus sanitized dashboard and social-preview assets.
+
+### Fixed
+- `--exact-tokens` now loads `gpt-tokenizer/encoding/o200k_base` explicitly.
+  The tokenizer is an optional peer, so normal consumers no longer download
+  its large data set by default.
+- Not-configured reports no longer display 100/100; positive `--fail-under`
+  gates fail clearly while `--fail-under 0` remains non-blocking.
+- The composite Action quotes caller inputs, exposes generated-candidate
+  outputs, updates only its own marked PR comment, and degrades safely with
+  read-only fork tokens.
+- The measured case study and README now lead with the result that reproduced
+  across both runs (the wall-time and spend penalty) and label the `n=4`
+  success ordering as inconclusive.
+
 ## [0.5.0]
 
 ### Added

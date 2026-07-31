@@ -4,6 +4,8 @@ export * from "./history.js";
 export type Severity = "info" | "warn" | "error";
 export type ReportFormat = "text" | "json" | "markdown" | "dashboard";
 export type LoadScope = "always" | "scoped" | "deferred";
+export type AnalysisStatus = "configured" | "not-configured";
+export type RiskLevel = "not-applicable" | "low" | "moderate" | "high" | "critical";
 export interface ContextTotals {
     files: number;
     lines: number;
@@ -51,19 +53,25 @@ export interface RepoSignals {
         typecheck?: string;
     };
 }
-export interface EffectEstimate {
-    taskSuccessDeltaPct: number;
-    tokenCostDeltaPct: number;
-    filesExploredDeltaPct: number;
-    commandCountDeltaPct: number;
-    risk: string;
+/**
+ * Directional signals derived from static rules, not measured agent outcomes.
+ * Use `run-bench` when causal or percentage claims are needed.
+ */
+export interface HeuristicSignals {
+    methodology: "static-heuristic";
+    overallRisk: RiskLevel;
+    outcomeRisk: RiskLevel;
+    tokenOverheadRisk: RiskLevel;
+    explorationOverheadRisk: RiskLevel;
+    commandOverheadRisk: RiskLevel;
+    primaryRisk: string;
 }
 export interface ContextScopeSummary {
     label: string;
     description: string;
-    score: number;
+    score: number | null;
     totals: ContextTotals;
-    effect: EffectEstimate;
+    signals: HeuristicSignals;
     issues: Issue[];
 }
 export interface ContextFileSummary {
@@ -75,7 +83,7 @@ export interface ContextFileSummary {
     lines: number;
     bytes: number;
     tokenEstimate: number;
-    effect: EffectEstimate;
+    signals: HeuristicSignals;
     issueCount: number;
     errorCount: number;
     warningCount: number;
@@ -84,14 +92,15 @@ export interface ContextFileSummary {
 export interface AnalysisResult {
     root: string;
     generatedAt: string;
-    score: number;
-    inventoryRiskScore: number;
+    status: AnalysisStatus;
+    score: number | null;
+    inventoryScore: number | null;
     files: ContextFile[];
     issues: Issue[];
     repo: RepoSignals;
     totals: ContextTotals;
-    effect: EffectEstimate;
-    inventoryEffect: EffectEstimate;
+    signals: HeuristicSignals;
+    inventorySignals: HeuristicSignals;
     operationalWeights: {
         always: number;
         scoped: number;
@@ -135,17 +144,27 @@ export interface GeneratedBenchTask {
 export declare function analyzeRepo(rootInput?: string, options?: AnalyzeOptions): AnalysisResult;
 export declare function discoverContextFiles(rootInput?: string, options?: AnalyzeOptions): ContextFile[];
 export declare function inferRepoSignals(rootInput?: string): RepoSignals;
+export declare function generateAgentsCandidate(result: AnalysisResult): string;
+/** @deprecated Use generateAgentsCandidate; this output is a candidate, not a proven optimization. */
 export declare function generateOptimizedAgents(result: AnalysisResult): string;
+export declare function writeAgentsCandidate(result: AnalysisResult, outputPath?: string): string;
+/** @deprecated Use writeAgentsCandidate; this output is a candidate, not a proven optimization. */
 export declare function writeOptimizedAgents(result: AnalysisResult, outputPath?: string): string;
 export declare function renderReport(result: AnalysisResult, format?: ReportFormat, optimizedPath?: string): string;
-export interface BaselineSummary {
+interface BaselineSummaryBase {
     label?: string;
     score: number;
-    inventoryRiskScore: number;
     totals: {
         tokenEstimate: number;
     };
 }
+export type BaselineSummary = BaselineSummaryBase & ({
+    inventoryScore: number;
+    inventoryRiskScore?: number;
+} | {
+    inventoryScore?: number;
+    inventoryRiskScore: number;
+});
 export declare function renderBaselineComparison(current: AnalysisResult, baseline: BaselineSummary, format?: ReportFormat): string;
 export declare function generateBenchFromGitHistory(rootInput?: string, options?: {
     limit?: number;

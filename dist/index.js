@@ -133,6 +133,8 @@ const REFERENCE_PLACEHOLDER = /(?:^|\/)(?:path\/to|to\/your|your-|example|placeh
 export function analyzeRepo(rootInput = ".", options = {}) {
     const root = path.resolve(rootInput);
     const files = discoverContextFiles(root, options);
+    const hasUsableContext = files.some((file) => file.content.trim().length > 0);
+    const status = hasUsableContext ? "configured" : "not-configured";
     const repo = inferRepoSignals(root);
     const issues = [];
     const maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
@@ -158,22 +160,23 @@ export function analyzeRepo(rootInput = ".", options = {}) {
     detectMissingReferences(files, root, issues);
     const totals = sumFileTotals(files);
     const sortedIssues = sortIssues(issues);
-    const inventoryRiskScore = contextScore(sortedIssues);
+    const inventoryScore = status === "configured" ? contextScore(sortedIssues) : null;
     const scopes = buildScopeSummaries(files, sortedIssues);
     const operationalWeights = scopeWeights(scopes);
-    const score = operationalScore(scopes, operationalWeights);
+    const score = status === "configured" ? operationalScore(scopes, operationalWeights) : null;
     const skillReports = buildContextFileSummaries(files, sortedIssues).filter((summary) => summary.kind === "skill");
     return {
         root,
         generatedAt: new Date().toISOString(),
+        status,
         score,
-        inventoryRiskScore,
+        inventoryScore,
         files,
         issues: sortedIssues,
         repo,
         totals,
-        effect: estimateOperationalEffect(scopes, operationalWeights),
-        inventoryEffect: estimateEffect(inventoryRiskScore, sortedIssues, totals),
+        signals: estimateOperationalSignals(scopes, operationalWeights, status),
+        inventorySignals: estimateSignals(inventoryScore, sortedIssues, totals),
         operationalWeights,
         skillReports,
         scopes
@@ -262,7 +265,7 @@ export function inferRepoSignals(rootInput = ".") {
         commands: inferCommands(root, packageManager, packageScripts)
     };
 }
-export function generateOptimizedAgents(result) {
+export function generateAgentsCandidate(result) {
     const repo = result.repo;
     const lines = [];
     const usefulRules = extractUsefulRules(result.files, result.issues);
@@ -306,18 +309,27 @@ export function generateOptimizedAgents(result) {
     lines.push("");
     return lines.join("\n");
 }
-export function writeOptimizedAgents(result, outputPath = path.join(result.root, "AGENTS.optimized.md")) {
-    const absolute = path.isAbsolute(outputPath) ? outputPath : path.join(result.root, outputPath);
+/** @deprecated Use generateAgentsCandidate; this output is a candidate, not a proven optimization. */
+export function generateOptimizedAgents(result) {
+    return generateAgentsCandidate(result);
+}
+export function writeAgentsCandidate(result, outputPath) {
+    const candidatePath = outputPath ?? path.join(result.root, result.status === "not-configured" ? "AGENTS.starter.md" : "AGENTS.optimized.md");
+    const absolute = path.isAbsolute(candidatePath) ? candidatePath : path.join(result.root, candidatePath);
     fs.mkdirSync(path.dirname(absolute), { recursive: true });
-    fs.writeFileSync(absolute, generateOptimizedAgents(result), "utf8");
+    fs.writeFileSync(absolute, generateAgentsCandidate(result), "utf8");
     return absolute;
+}
+/** @deprecated Use writeAgentsCandidate; this output is a candidate, not a proven optimization. */
+export function writeOptimizedAgents(result, outputPath) {
+    return writeAgentsCandidate(result, outputPath);
 }
 export function renderReport(result, format = "text", optimizedPath) {
     if (format === "json") {
         return JSON.stringify(toSerializableResult(result, optimizedPath), null, 2);
     }
     if (format === "dashboard") {
-        return renderDashboardReports([{ result: toSerializableResult(result, optimizedPath), agentsPreview: generateOptimizedAgents(result) }]);
+        return renderDashboardReports([{ result: toSerializableResult(result, optimizedPath), agentsPreview: generateAgentsCandidate(result) }]);
     }
     if (format === "markdown") {
         return renderMarkdownReport(result, optimizedPath);
@@ -325,9 +337,17 @@ export function renderReport(result, format = "text", optimizedPath) {
     return renderTextReport(result, optimizedPath);
 }
 export function renderBaselineComparison(current, baseline, format = "text") {
+    if (current.status === "not-configured" || current.score === null || current.inventoryScore === null) {
+        const message = "Baseline comparison unavailable: no agent context is configured in the current repository.";
+        return format === "markdown" ? `\n## Baseline Comparison\n\n${message}` : `\n${message}`;
+    }
+    const baselineInventoryScore = baseline.inventoryScore ?? baseline.inventoryRiskScore;
+    if (typeof baselineInventoryScore !== "number") {
+        throw new Error("Baseline summary is missing inventoryScore (or legacy inventoryRiskScore).");
+    }
     const rows = [
         ["Operational score", baseline.score, current.score, true],
-        ["Inventory risk score", baseline.inventoryRiskScore, current.inventoryRiskScore, true],
+        ["Inventory score", baselineInventoryScore, current.inventoryScore, true],
         ["Estimated tokens", baseline.totals.tokenEstimate, current.totals.tokenEstimate, false]
     ];
     const label = baseline.label ?? "baseline";
@@ -403,6 +423,19 @@ export function generateBenchFromGitHistory(rootInput = ".", options = {}) {
     }));
 }
 function detectFileIssues(file, options, issues) {
+    if (file.content.trim().length === 0) {
+        issues.push({
+            id: "empty-context-file",
+            title: "Empty context file",
+            severity: "warn",
+            category: "coverage",
+            file: file.relativePath,
+            line: 1,
+            message: `${file.relativePath} exists but contains no usable instructions.`,
+            suggestion: "Add only concrete repository-specific commands or boundaries, or remove the empty file.",
+            impact: 10
+        });
+    }
     if (file.lineCount > options.maxLines || file.byteLength > options.maxBytes) {
         issues.push({
             id: "context-bloat",
@@ -756,11 +789,15 @@ function detectMissingSpecificCommands(files, repo, issues) {
     if (!repo.commands.test || COMMAND_REGEX.test(all)) {
         return;
     }
+    const target = files.find((file) => file.loadScope === "always")
+        ?? files.find((file) => file.loadScope === "scoped")
+        ?? files[0];
     issues.push({
         id: "missing-test-command",
         title: "Missing concrete test command",
         severity: "warn",
         category: "tests",
+        file: target.relativePath,
         message: `package.json exposes a test script, but the context file does not name ${repo.commands.test}.`,
         suggestion: `Add a short testing section with ${code(repo.commands.test)} and when to run it.`,
         impact: 7
@@ -890,13 +927,14 @@ function buildScopeSummaries(files, issues) {
 }
 function buildScopeSummary(label, description, files, issues) {
     const totals = sumFileTotals(files);
-    const score = contextScore(issues);
+    const hasUsableContext = files.some((file) => file.content.trim().length > 0);
+    const score = hasUsableContext ? contextScore(issues) : null;
     return {
         label,
         description,
         score,
         totals,
-        effect: estimateEffect(score, issues, totals),
+        signals: estimateSignals(score, issues, totals),
         issues
     };
 }
@@ -921,7 +959,7 @@ function buildContextFileSummaries(files, issues) {
             lines: file.lineCount,
             bytes: file.byteLength,
             tokenEstimate: file.tokenEstimate,
-            effect: estimateEffect(score, fileIssues, totals),
+            signals: estimateSignals(score, fileIssues, totals),
             issueCount: fileIssues.length,
             errorCount: fileIssues.filter((issue) => issue.severity === "error").length,
             warningCount: fileIssues.filter((issue) => issue.severity === "warn").length,
@@ -955,9 +993,12 @@ function contextFileDisplayName(file) {
     return file.relativePath;
 }
 function scopeWeights(scopes) {
-    const hasAlways = scopes.always.totals.files > 0 || scopes.always.issues.length > 0;
-    const hasScoped = scopes.scoped.totals.files > 0 || scopes.scoped.issues.length > 0;
-    const hasDeferred = scopes.deferred.totals.files > 0 || scopes.deferred.issues.length > 0;
+    // Operational weights model files that can actually load. Repository-wide
+    // findings without a file still belong in the inventory score, but must not
+    // create a phantom loaded scope.
+    const hasAlways = scopes.always.score !== null;
+    const hasScoped = scopes.scoped.score !== null;
+    const hasDeferred = scopes.deferred.score !== null;
     if (hasAlways && hasScoped && hasDeferred) {
         return { always: 0.7, scoped: 0.15, deferred: 0.15 };
     }
@@ -979,35 +1020,54 @@ function scopeWeights(scopes) {
     return { always: 1, scoped: 0, deferred: 0 };
 }
 function operationalScore(scopes, weights) {
-    return Math.round(scopes.always.score * weights.always +
-        scopes.scoped.score * weights.scoped +
-        scopes.deferred.score * weights.deferred);
+    const weighted = ((scopes.always.score ?? 0) * weights.always +
+        (scopes.scoped.score ?? 0) * weights.scoped +
+        (scopes.deferred.score ?? 0) * weights.deferred);
+    return Math.round(weighted);
 }
-function estimateOperationalEffect(scopes, weights) {
-    const weighted = (field) => Math.round(scopes.always.effect[field] * weights.always +
-        scopes.scoped.effect[field] * weights.scoped +
-        scopes.deferred.effect[field] * weights.deferred);
+function estimateOperationalSignals(scopes, weights, status) {
+    if (status === "not-configured") {
+        return notApplicableSignals("No agent context is configured");
+    }
+    const weightedLevel = (field) => {
+        const value = riskLevelValue(scopes.always.signals[field]) * weights.always +
+            riskLevelValue(scopes.scoped.signals[field]) * weights.scoped +
+            riskLevelValue(scopes.deferred.signals[field]) * weights.deferred;
+        return riskLevelFromValue(value);
+    };
+    const primaryRisk = operationalPrimaryRisk(scopes, weights);
+    const outcomeRisk = weightedLevel("outcomeRisk");
+    const tokenOverheadRisk = weightedLevel("tokenOverheadRisk");
+    const explorationOverheadRisk = weightedLevel("explorationOverheadRisk");
+    const commandOverheadRisk = weightedLevel("commandOverheadRisk");
     return {
-        taskSuccessDeltaPct: weighted("taskSuccessDeltaPct"),
-        tokenCostDeltaPct: weighted("tokenCostDeltaPct"),
-        filesExploredDeltaPct: weighted("filesExploredDeltaPct"),
-        commandCountDeltaPct: weighted("commandCountDeltaPct"),
-        risk: operationalRisk(scopes, weights)
+        methodology: "static-heuristic",
+        overallRisk: /dangerous instruction/i.test(primaryRisk)
+            ? "critical"
+            : highestRisk([outcomeRisk, tokenOverheadRisk, explorationOverheadRisk, commandOverheadRisk]),
+        outcomeRisk,
+        tokenOverheadRisk,
+        explorationOverheadRisk,
+        commandOverheadRisk,
+        primaryRisk
     };
 }
-function operationalRisk(scopes, weights) {
-    if (weights.always > 0 && scopes.always.effect.risk !== "No major risk detected") {
-        return scopes.always.effect.risk;
+function operationalPrimaryRisk(scopes, weights) {
+    if (weights.always > 0 && scopes.always.signals.primaryRisk !== "No major risk detected") {
+        return scopes.always.signals.primaryRisk;
     }
-    if (weights.scoped > 0 && scopes.scoped.effect.risk !== "No major risk detected") {
-        return `Subtree-scoped risk: ${scopes.scoped.effect.risk}`;
+    if (weights.scoped > 0 && scopes.scoped.signals.primaryRisk !== "No major risk detected") {
+        return `Subtree-scoped risk: ${scopes.scoped.signals.primaryRisk}`;
     }
-    if (weights.deferred > 0 && scopes.deferred.effect.risk !== "No major risk detected") {
-        return `Deferred skill risk: ${scopes.deferred.effect.risk}`;
+    if (weights.deferred > 0 && scopes.deferred.signals.primaryRisk !== "No major risk detected") {
+        return `Deferred skill risk: ${scopes.deferred.signals.primaryRisk}`;
     }
     return "No major risk detected";
 }
-function estimateEffect(score, issues, totals) {
+function estimateSignals(score, issues, totals) {
+    if (score === null) {
+        return notApplicableSignals("No context in this scope");
+    }
     const errors = issues.filter((issue) => issue.severity === "error").length;
     const warns = issues.filter((issue) => issue.severity === "warn").length;
     const bloat = issues.filter((issue) => issue.category === "context-bloat").length;
@@ -1015,58 +1075,119 @@ function estimateEffect(score, issues, totals) {
     const vague = issues.filter((issue) => issue.category === "specificity").length;
     const duplicates = issues.filter((issue) => issue.category === "duplication").length;
     const security = issues.filter((issue) => issue.category === "security").length;
-    const tokenCostDeltaPct = Math.min(180, Math.max(0, Math.round(totals.tokenEstimate / 120 + bloat * 14 + duplicates * 6 + conflicts * 8)));
-    const filesExploredDeltaPct = Math.min(140, Math.max(0, Math.round(bloat * 22 + vague * 14 + duplicates * 8 + conflicts * 10)));
-    const commandCountDeltaPct = Math.min(80, Math.max(0, Math.round(conflicts * 12 + issues.filter((issue) => issue.category === "tests").length * 10)));
-    const taskSuccessDeltaPct = -Math.min(65, Math.max(0, Math.round((100 - score) / 2 + errors * 3 + warns)));
-    let risk = "No major risk detected";
+    const tokenOverheadIndex = Math.min(180, Math.max(0, Math.round(totals.tokenEstimate / 120 + bloat * 14 + duplicates * 6 + conflicts * 8)));
+    const explorationIndex = Math.min(140, Math.max(0, Math.round(bloat * 22 + vague * 14 + duplicates * 8 + conflicts * 10)));
+    const commandIndex = Math.min(80, Math.max(0, Math.round(conflicts * 12 + issues.filter((issue) => issue.category === "tests").length * 10)));
+    const outcomeIndex = Math.min(65, Math.max(0, Math.round((100 - score) / 2 + errors * 3 + warns)));
+    let primaryRisk = "No major risk detected";
     if (security > 0) {
-        risk = "Dangerous instruction detected";
+        primaryRisk = "Dangerous instruction detected";
     }
     else if (conflicts > 0) {
-        risk = "Conflicting instructions detected";
+        primaryRisk = "Conflicting instructions detected";
     }
     else if (bloat > 0) {
-        risk = "Context bloat detected";
+        primaryRisk = "Context bloat detected";
     }
     else if (duplicates > 0) {
-        risk = "Duplicate context rules detected";
+        primaryRisk = "Duplicate context rules detected";
     }
+    else {
+        primaryRisk = issues.find((issue) => issue.severity !== "info")?.title ?? primaryRisk;
+    }
+    const outcomeRisk = thresholdRisk(outcomeIndex, 5, 15, 30);
+    const tokenOverheadRisk = thresholdRisk(tokenOverheadIndex, 10, 35, 75);
+    const explorationOverheadRisk = thresholdRisk(explorationIndex, 5, 25, 60);
+    const commandOverheadRisk = thresholdRisk(commandIndex, 5, 20, 45);
     return {
-        taskSuccessDeltaPct,
-        tokenCostDeltaPct,
-        filesExploredDeltaPct,
-        commandCountDeltaPct,
-        risk
+        methodology: "static-heuristic",
+        overallRisk: security > 0
+            ? "critical"
+            : highestRisk([outcomeRisk, tokenOverheadRisk, explorationOverheadRisk, commandOverheadRisk]),
+        outcomeRisk,
+        tokenOverheadRisk,
+        explorationOverheadRisk,
+        commandOverheadRisk,
+        primaryRisk
     };
+}
+function notApplicableSignals(primaryRisk) {
+    return {
+        methodology: "static-heuristic",
+        overallRisk: "not-applicable",
+        outcomeRisk: "not-applicable",
+        tokenOverheadRisk: "not-applicable",
+        explorationOverheadRisk: "not-applicable",
+        commandOverheadRisk: "not-applicable",
+        primaryRisk
+    };
+}
+function thresholdRisk(value, moderate, high, critical) {
+    if (value >= critical)
+        return "critical";
+    if (value >= high)
+        return "high";
+    if (value >= moderate)
+        return "moderate";
+    return "low";
+}
+function riskLevelValue(level) {
+    return ({ "not-applicable": 0, low: 0, moderate: 1, high: 2, critical: 3 })[level];
+}
+function riskLevelFromValue(value) {
+    if (value >= 2.5)
+        return "critical";
+    if (value >= 1.5)
+        return "high";
+    if (value >= 0.5)
+        return "moderate";
+    return "low";
+}
+function highestRisk(levels) {
+    return levels.reduce((highest, level) => riskLevelValue(level) > riskLevelValue(highest) ? level : highest, "low");
 }
 function renderTextReport(result, optimizedPath) {
     const lines = [];
+    if (result.status === "not-configured") {
+        const hasEmptyFiles = result.totals.files > 0;
+        lines.push("Status: Not configured");
+        lines.push(`Score: Not available (${hasEmptyFiles ? "supported context files are empty" : "no agent context files were found"})`);
+        lines.push("");
+        lines.push(hasEmptyFiles
+            ? "Supported agent context files were found, but they contain no usable instructions."
+            : "No AGENTS.md, CLAUDE.md, SKILL.md, Cursor rule, or Copilot instruction file was found.");
+        lines.push("Add context only when this repository needs agent-specific commands, boundaries, or non-obvious workflow rules.");
+        lines.push("");
+        if (optimizedPath) {
+            lines.push(`Starter candidate written: ${normalizePath(path.relative(result.root, optimizedPath))}`);
+        }
+        else {
+            lines.push("Suggested starter path: AGENTS.starter.md");
+            lines.push("Run with --write-optimized to generate the starter candidate for review.");
+        }
+        return lines.join("\n");
+    }
+    lines.push("Status: Configured");
     lines.push(`Operational Score: ${result.score}/100`);
-    lines.push(`Inventory Risk Score: ${result.inventoryRiskScore}/100`);
+    lines.push(`Inventory Score: ${result.inventoryScore}/100`);
     lines.push("");
     lines.push(`Operational weights: always-loaded ${Math.round(result.operationalWeights.always * 100)}%, subtree-scoped ${Math.round(result.operationalWeights.scoped * 100)}%, deferred skills ${Math.round(result.operationalWeights.deferred * 100)}%`);
     lines.push(`Inventory context: ${result.totals.files} files, ${result.totals.lines} lines, ${result.totals.bytes} bytes, ~${result.totals.tokenEstimate} tokens`);
-    lines.push("Operational effect on agent:");
-    lines.push(`- Task success: ${signed(result.effect.taskSuccessDeltaPct)}%`);
-    lines.push(`- Token cost: +${result.effect.tokenCostDeltaPct}%`);
-    lines.push(`- Files explored: +${result.effect.filesExploredDeltaPct}%`);
-    lines.push(`- Commands run: +${result.effect.commandCountDeltaPct}%`);
-    lines.push(`- Risk: ${result.effect.risk}`);
-    lines.push("Inventory risk effect:");
-    lines.push(`- Task success: ${signed(result.inventoryEffect.taskSuccessDeltaPct)}%`);
-    lines.push(`- Token cost: +${result.inventoryEffect.tokenCostDeltaPct}%`);
-    lines.push(`- Files explored: +${result.inventoryEffect.filesExploredDeltaPct}%`);
-    lines.push(`- Commands run: +${result.inventoryEffect.commandCountDeltaPct}%`);
-    lines.push(`- Risk: ${result.inventoryEffect.risk}`);
+    lines.push("Static heuristic signals (directional, not measured outcomes):");
+    renderTextSignals(lines, result.signals);
+    lines.push("Inventory-wide heuristic signals:");
+    renderTextSignals(lines, result.inventorySignals);
     renderTextScope(lines, result.scopes.always);
     renderTextScope(lines, result.scopes.scoped);
     renderTextScope(lines, result.scopes.deferred);
     renderTextSkillBreakdown(lines, result.skillReports, 20);
     lines.push("");
-    lines.push(`Suggested optimized file: ${optimizedPath ? normalizePath(path.relative(result.root, optimizedPath)) : "AGENTS.optimized.md"}`);
-    if (!optimizedPath) {
-        lines.push("Run with --write-optimized to generate it.");
+    if (optimizedPath) {
+        lines.push(`Context candidate written: ${normalizePath(path.relative(result.root, optimizedPath))}`);
+    }
+    else {
+        lines.push("Suggested context candidate path: AGENTS.optimized.md");
+        lines.push("Run with --write-optimized to generate a candidate for review and benchmarking.");
     }
     return lines.join("\n");
 }
@@ -1074,32 +1195,74 @@ function renderMarkdownReport(result, optimizedPath) {
     const lines = [];
     lines.push(`# Agent Context Bench Report`);
     lines.push("");
+    if (result.status === "not-configured") {
+        const hasEmptyFiles = result.totals.files > 0;
+        lines.push("**Status:** Not configured");
+        lines.push("");
+        lines.push(`**Score:** Not available because ${hasEmptyFiles ? "the supported context files are empty" : "no agent context files were found"}.`);
+        lines.push("");
+        lines.push(hasEmptyFiles
+            ? "Supported agent context files were found, but they contain no usable instructions. Add concrete repository-specific guidance or remove the empty files."
+            : "No AGENTS.md, CLAUDE.md, SKILL.md, Cursor rule, or Copilot instruction file was found. Add context only for agent-specific commands, boundaries, or non-obvious workflow rules.");
+        lines.push("");
+        if (optimizedPath) {
+            lines.push(`Starter candidate written: \`${normalizePath(path.relative(result.root, optimizedPath))}\``);
+        }
+        else {
+            lines.push("Suggested starter path: `AGENTS.starter.md`");
+            lines.push("");
+            lines.push("Run with `--write-optimized` to generate the starter candidate for review.");
+        }
+        return lines.join("\n");
+    }
+    lines.push(`**Status:** Configured`);
+    lines.push("");
     lines.push(`**Operational Score:** ${result.score}/100`);
-    lines.push(`**Inventory Risk Score:** ${result.inventoryRiskScore}/100`);
+    lines.push(`**Inventory Score:** ${result.inventoryScore}/100`);
     lines.push("");
     lines.push(`Operational weights: always-loaded ${Math.round(result.operationalWeights.always * 100)}%, subtree-scoped ${Math.round(result.operationalWeights.scoped * 100)}%, deferred skills ${Math.round(result.operationalWeights.deferred * 100)}%.`);
     lines.push("");
-    lines.push("| Scope | Score | Files | Lines | Estimated tokens | Task success | Token cost | Files explored | Risk |");
-    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
-    lines.push(markdownScopeRow("Inventory risk", result.inventoryRiskScore, result.totals, result.inventoryEffect));
-    lines.push(markdownScopeRow(result.scopes.always.label, result.scopes.always.score, result.scopes.always.totals, result.scopes.always.effect));
-    lines.push(markdownScopeRow(result.scopes.scoped.label, result.scopes.scoped.score, result.scopes.scoped.totals, result.scopes.scoped.effect));
-    lines.push(markdownScopeRow(result.scopes.deferred.label, result.scopes.deferred.score, result.scopes.deferred.totals, result.scopes.deferred.effect));
+    lines.push("Static heuristic signals below are directional risk levels from lint rules, not measured agent outcomes. Use `run-bench` for measured comparisons.");
+    lines.push("");
+    lines.push("| Scope | Score | Files | Lines | Estimated tokens | Outcome risk | Token overhead | Exploration overhead | Command overhead | Primary risk |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |");
+    lines.push(markdownScopeRow("Inventory", result.inventoryScore, result.totals, result.inventorySignals));
+    lines.push(markdownScopeRow(result.scopes.always.label, result.scopes.always.score, result.scopes.always.totals, result.scopes.always.signals));
+    lines.push(markdownScopeRow(result.scopes.scoped.label, result.scopes.scoped.score, result.scopes.scoped.totals, result.scopes.scoped.signals));
+    lines.push(markdownScopeRow(result.scopes.deferred.label, result.scopes.deferred.score, result.scopes.deferred.totals, result.scopes.deferred.signals));
     renderMarkdownScope(lines, result.scopes.always);
     renderMarkdownScope(lines, result.scopes.scoped);
     renderMarkdownScope(lines, result.scopes.deferred);
     renderMarkdownSkillBreakdown(lines, result.skillReports);
     lines.push("");
-    lines.push(`Suggested optimized file: \`${optimizedPath ? normalizePath(path.relative(result.root, optimizedPath)) : "AGENTS.optimized.md"}\``);
+    if (optimizedPath) {
+        lines.push(`Context candidate written: \`${normalizePath(path.relative(result.root, optimizedPath))}\``);
+    }
+    else {
+        lines.push("Suggested context candidate path: `AGENTS.optimized.md`");
+        lines.push("");
+        lines.push("Run with `--write-optimized` to generate a candidate for review and benchmarking.");
+    }
     return lines.join("\n");
+}
+function renderTextSignals(lines, signals) {
+    lines.push(`- Overall risk: ${signals.overallRisk}`);
+    lines.push(`- Outcome risk: ${signals.outcomeRisk}`);
+    lines.push(`- Token overhead risk: ${signals.tokenOverheadRisk}`);
+    lines.push(`- Exploration overhead risk: ${signals.explorationOverheadRisk}`);
+    lines.push(`- Command overhead risk: ${signals.commandOverheadRisk}`);
+    lines.push(`- Primary risk: ${signals.primaryRisk}`);
+}
+function formatScore(score) {
+    return score === null ? "Not applicable" : `${score}/100`;
 }
 function renderTextScope(lines, summary) {
     lines.push("");
-    lines.push(`${summary.label}: ${summary.score}/100`);
+    lines.push(`${summary.label}: ${formatScore(summary.score)}`);
     lines.push(`- ${summary.description}`);
     lines.push(`- Size: ${summary.totals.files} files, ${summary.totals.lines} lines, ${summary.totals.bytes} bytes, ~${summary.totals.tokenEstimate} tokens`);
-    lines.push(`- Effect: task success ${signed(summary.effect.taskSuccessDeltaPct)}%, token cost +${summary.effect.tokenCostDeltaPct}%, files explored +${summary.effect.filesExploredDeltaPct}%`);
-    lines.push(`- Risk: ${summary.effect.risk}`);
+    lines.push(`- Heuristic signals: outcome ${summary.signals.outcomeRisk}, token overhead ${summary.signals.tokenOverheadRisk}, exploration overhead ${summary.signals.explorationOverheadRisk}, command overhead ${summary.signals.commandOverheadRisk}`);
+    lines.push(`- Primary risk: ${summary.signals.primaryRisk}`);
     lines.push("Problems:");
     const actionable = summary.issues.filter((issue) => issue.severity !== "info");
     if (actionable.length === 0) {
@@ -1140,8 +1303,8 @@ function renderMarkdownScope(lines, summary) {
         }
     }
 }
-function markdownScopeRow(label, score, totals, effect) {
-    return `| ${escapePipe(label)} | ${score}/100 | ${totals.files} | ${totals.lines} | ${totals.tokenEstimate} | ${signed(effect.taskSuccessDeltaPct)}% | +${effect.tokenCostDeltaPct}% | +${effect.filesExploredDeltaPct}% | ${escapePipe(effect.risk)} |`;
+function markdownScopeRow(label, score, totals, signals) {
+    return `| ${escapePipe(label)} | ${formatScore(score)} | ${totals.files} | ${totals.lines} | ${totals.tokenEstimate} | ${signals.outcomeRisk} | ${signals.tokenOverheadRisk} | ${signals.explorationOverheadRisk} | ${signals.commandOverheadRisk} | ${escapePipe(signals.primaryRisk)} |`;
 }
 function renderTextSkillBreakdown(lines, reports, limit) {
     if (reports.length === 0) {
@@ -1150,9 +1313,9 @@ function renderTextSkillBreakdown(lines, reports, limit) {
     const shown = reports.slice(0, limit);
     lines.push("");
     lines.push(`Skill file breakdown: ${reports.length} SKILL.md files`);
-    lines.push("Columns: score | tokens | token cost | task success | risk | issues | skill path");
+    lines.push("Columns: score | tokens | outcome risk | token overhead risk | primary risk | issues | skill path");
     for (const report of shown) {
-        lines.push(`- ${report.score}/100 | ~${report.tokenEstimate} tokens | +${report.effect.tokenCostDeltaPct}% cost | ${signed(report.effect.taskSuccessDeltaPct)}% success | ${report.effect.risk} | ${report.errorCount}e/${report.warningCount}w | ${report.path}`);
+        lines.push(`- ${report.score}/100 | ~${report.tokenEstimate} tokens | ${report.signals.outcomeRisk} outcome | ${report.signals.tokenOverheadRisk} token overhead | ${report.signals.primaryRisk} | ${report.errorCount}e/${report.warningCount}w | ${report.path}`);
     }
     if (reports.length > shown.length) {
         lines.push(`- ... ${reports.length - shown.length} more skill files omitted from terminal output; use --format markdown or --format json for all rows.`);
@@ -1167,10 +1330,10 @@ function renderMarkdownSkillBreakdown(lines, reports) {
     lines.push("");
     lines.push("Each row is calculated only from issues attached to that `SKILL.md` file.");
     lines.push("");
-    lines.push("| Skill | Score | Lines | Estimated tokens | Token cost | Task success | Files explored | Risk | Issues | Path |");
-    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |");
+    lines.push("| Skill | Score | Lines | Estimated tokens | Outcome risk | Token overhead | Exploration overhead | Primary risk | Issues | Path |");
+    lines.push("| --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: | --- |");
     for (const report of reports) {
-        lines.push(`| ${escapePipe(report.name)} | ${report.score}/100 | ${report.lines} | ${report.tokenEstimate} | +${report.effect.tokenCostDeltaPct}% | ${signed(report.effect.taskSuccessDeltaPct)}% | +${report.effect.filesExploredDeltaPct}% | ${escapePipe(report.effect.risk)} | ${report.errorCount}e/${report.warningCount}w | ${escapePipe(report.path)} |`);
+        lines.push(`| ${escapePipe(report.name)} | ${report.score}/100 | ${report.lines} | ${report.tokenEstimate} | ${report.signals.outcomeRisk} | ${report.signals.tokenOverheadRisk} | ${report.signals.explorationOverheadRisk} | ${escapePipe(report.signals.primaryRisk)} | ${report.errorCount}e/${report.warningCount}w | ${escapePipe(report.path)} |`);
     }
 }
 function toSerializableResult(result, optimizedPath) {

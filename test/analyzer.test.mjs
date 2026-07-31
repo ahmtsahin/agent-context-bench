@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -66,9 +67,77 @@ test("handles repos without context files", () => {
   const root = tempRepo();
   const result = analyzeRepo(root);
 
-  assert.equal(result.score, 100);
+  assert.equal(result.status, "not-configured");
+  assert.equal(result.score, null);
+  assert.equal(result.inventoryScore, null);
+  assert.equal(result.signals.overallRisk, "not-applicable");
   assert.equal(result.files.length, 0);
   assert.equal(result.issues[0].id, "missing-context");
+
+  const text = renderReport(result, "text");
+  assert.match(text, /Status: Not configured/);
+  assert.match(text, /Score: Not available/);
+  assert.match(text, /AGENTS\.starter\.md/);
+  assert.doesNotMatch(text, /100\/100/);
+
+  const markdown = renderReport(result, "markdown");
+  assert.match(markdown, /\*\*Status:\*\* Not configured/);
+  assert.match(markdown, /Suggested starter path: `AGENTS\.starter\.md`/);
+  assert.match(markdown, /`--write-optimized`/);
+  assert.doesNotMatch(markdown, /100\/100/);
+});
+
+test("treats empty context placeholders as not configured", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "  \n\t\n");
+
+  const result = analyzeRepo(root);
+
+  assert.equal(result.status, "not-configured");
+  assert.equal(result.score, null);
+  assert.equal(result.inventoryScore, null);
+  assert.ok(issueIds(result).includes("empty-context-file"));
+  assert.equal(result.scopes.always.score, null);
+  assert.equal(result.scopes.always.signals.overallRisk, "not-applicable");
+  assert.match(renderReport(result, "text"), /supported context files are empty/i);
+  assert.doesNotMatch(renderReport(result, "text"), /100\/100/);
+});
+
+test("flags an empty file inside an otherwise configured inventory", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
+  fs.writeFileSync(path.join(root, "CLAUDE.md"), "\n");
+
+  const result = analyzeRepo(root);
+
+  assert.equal(result.status, "configured");
+  assert.ok(issueIds(result).includes("empty-context-file"));
+  assert.ok(result.inventoryScore < 100);
+});
+
+test("empty scopes do not dilute a usable deferred scope", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "\n");
+  fs.mkdirSync(path.join(root, "skills", "review"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "skills", "review", "SKILL.md"),
+    [
+      "---",
+      "name: review",
+      "description: Review a focused change when the user explicitly requests code review.",
+      "---",
+      "",
+      "Inspect the touched implementation and report concrete findings."
+    ].join("\n")
+  );
+
+  const result = analyzeRepo(root);
+
+  assert.equal(result.status, "configured");
+  assert.equal(result.scopes.always.score, null);
+  assert.equal(result.operationalWeights.always, 0);
+  assert.equal(result.operationalWeights.deferred, 1);
+  assert.equal(result.score, result.scopes.deferred.score);
 });
 
 test("generates optimized AGENTS content from repo signals", () => {
@@ -95,12 +164,17 @@ test("renders json report without embedding file contents", () => {
   const result = analyzeRepo(root);
   const parsed = JSON.parse(renderReport(result, "json"));
 
+  assert.equal(parsed.status, "configured");
   assert.equal(parsed.files[0].path, "AGENTS.md");
   assert.equal(parsed.files[0].loadScope, "always");
   assert.equal(parsed.files[0].content, undefined);
   assert.equal(parsed.scopes.always.totals.files, 1);
   assert.equal(parsed.scopes.scoped.totals.files, 0);
   assert.equal(parsed.scopes.deferred.totals.files, 0);
+  assert.equal(parsed.effect, undefined);
+  assert.equal(parsed.inventoryEffect, undefined);
+  assert.equal(parsed.signals.methodology, "static-heuristic");
+  assert.ok(["low", "moderate", "high", "critical"].includes(parsed.signals.outcomeRisk));
 });
 
 test("separates nested agent files into subtree-scoped context", () => {
@@ -152,6 +226,35 @@ test("includes SKILL.md files in context scoring", () => {
   assert.ok(result.scopes.deferred.issues.some((issue) => issue.id === "context-bloat"));
 });
 
+test("repository-wide findings do not create a phantom always-loaded scope", () => {
+  const root = tempRepo();
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ name: "skills-only", scripts: { test: "node --test" } })
+  );
+  fs.mkdirSync(path.join(root, "skills", "review"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "skills", "review", "SKILL.md"),
+    [
+      "---",
+      "name: review",
+      "description: Review a focused change when the user requests code-review guidance.",
+      "---",
+      "",
+      "Inspect the touched implementation before reporting findings."
+    ].join("\n")
+  );
+
+  const result = analyzeRepo(root);
+
+  assert.ok(result.issues.some((issue) => issue.id === "missing-test-command"));
+  assert.equal(result.scopes.always.totals.files, 0);
+  assert.equal(result.scopes.always.issues.length, 0);
+  assert.equal(result.operationalWeights.always, 0);
+  assert.equal(result.operationalWeights.deferred, 1);
+  assert.equal(result.score, result.scopes.deferred.score);
+});
+
 test("markdown report separates always-loaded and deferred skill context", () => {
   const root = tempRepo();
   fs.mkdirSync(path.join(root, "skills", "demo"), { recursive: true });
@@ -168,7 +271,7 @@ test("markdown report separates always-loaded and deferred skill context", () =>
   assert.match(markdown, /Deferred skill context/);
   assert.match(markdown, /Skill File Breakdown/);
   assert.match(markdown, /\| demo \|/);
-  assert.match(markdown, /\| Inventory risk \|/);
+  assert.match(markdown, /\| Inventory \|/);
 });
 
 test("renders standalone dashboard with overview, skill, and AGENTS views", () => {
@@ -184,7 +287,7 @@ test("renders standalone dashboard with overview, skill, and AGENTS views", () =
   assert.match(dashboard, /<!doctype html>/);
   assert.match(dashboard, /Agent Context Bench Dashboard/);
   assert.match(dashboard, /data-view="skills"/);
-  assert.match(dashboard, /AGENTS\.md Preview/);
+  assert.match(dashboard, /AGENTS\.md Candidate Preview/);
   assert.match(dashboard, /Prefer `src\//);
   assert.match(dashboard, /demo/);
 });
@@ -197,11 +300,80 @@ test("renders dashboard from serialized JSON reports", () => {
   const serialized = JSON.parse(renderReport(result, "json"));
   const dashboard = renderDashboardReports([
     { label: "sample-report", sourceFile: "reports/sample-report.json", result: serialized }
-  ]);
+  ], { generatedAt: "2026-07-31T12:00:00.000Z" });
 
   assert.match(dashboard, /sample-report/);
   assert.match(dashboard, /reports\/sample-report\.json/);
-  assert.match(dashboard, /AGENTS\.md Preview/);
+  assert.match(dashboard, /AGENTS\.md Candidate Preview/);
+  assert.match(dashboard, /2026-07-31T12:00:00\.000Z/);
+});
+
+test("dashboard renders legacy 0.5 JSON without exposing old percentage estimates", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
+  const legacy = JSON.parse(renderReport(analyzeRepo(root), "json"));
+
+  delete legacy.status;
+  legacy.inventoryRiskScore = legacy.inventoryScore;
+  delete legacy.inventoryScore;
+  legacy.effect = { risk: legacy.signals.primaryRisk, taskSuccessDeltaPct: -3, tokenCostDeltaPct: 7 };
+  legacy.inventoryEffect = { risk: legacy.inventorySignals.primaryRisk, taskSuccessDeltaPct: -3, tokenCostDeltaPct: 7 };
+  delete legacy.signals;
+  delete legacy.inventorySignals;
+  for (const scope of Object.values(legacy.scopes)) {
+    scope.effect = { risk: scope.signals.primaryRisk, taskSuccessDeltaPct: -3, tokenCostDeltaPct: 7 };
+    delete scope.signals;
+  }
+  for (const skill of legacy.skillReports) {
+    skill.effect = { risk: skill.signals.primaryRisk, taskSuccessDeltaPct: -3, tokenCostDeltaPct: 7 };
+    delete skill.signals;
+  }
+
+  const dashboard = renderDashboardReports([{ label: "legacy-0.5", result: legacy }]);
+  const scripts = [...dashboard.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)];
+  assert.match(dashboard, /legacy-0\.5/);
+  assert.match(dashboard, /Legacy report; regenerate|legacy report/);
+  assert.doesNotMatch(dashboard, /Task success<\/th>|Token cost<\/th>/);
+  assert.doesNotThrow(() => new Function(scripts.at(-1)[1]));
+
+  const legacyFile = path.join(root, "legacy.json");
+  const outputFile = path.join(root, "legacy-dashboard.html");
+  fs.writeFileSync(legacyFile, JSON.stringify(legacy));
+  execFileSync(process.execPath, [path.resolve("dist/cli.js"), "dashboard", legacyFile, "-o", outputFile], {
+    cwd: path.resolve("."),
+    encoding: "utf8"
+  });
+  assert.match(fs.readFileSync(outputFile, "utf8"), /legacy\.json/);
+});
+
+test("dashboard treats a legacy empty report as neutral and unconfigured", () => {
+  const root = tempRepo();
+  const legacy = JSON.parse(renderReport(analyzeRepo(root), "json"));
+  delete legacy.status;
+  legacy.files = [{
+    path: "AGENTS.md",
+    kind: "agents",
+    loadScope: "always",
+    lines: 0,
+    bytes: 0,
+    tokenEstimate: 0
+  }];
+  legacy.totals.files = 1;
+  legacy.score = 100;
+  legacy.inventoryRiskScore = 100;
+  delete legacy.inventoryScore;
+  legacy.effect = { risk: "No major risk detected", taskSuccessDeltaPct: 0, tokenCostDeltaPct: 0 };
+  legacy.inventoryEffect = legacy.effect;
+  delete legacy.signals;
+  delete legacy.inventorySignals;
+
+  const dashboard = renderDashboardReports([{ label: "legacy-empty", result: legacy }]);
+
+  assert.match(dashboard, /function isConfigured\(r\)/);
+  assert.match(dashboard, /Number\(f\.bytes\|\|0\)>0/);
+  assert.match(dashboard, /var configured=isConfigured\(r\)/);
+  assert.match(dashboard, /var inventoryScore=configured\?/);
+  assert.match(dashboard, /'Not configured'/);
 });
 
 test("does not flag conflicts between two skills that never co-load", () => {
@@ -328,13 +500,62 @@ test("renders a baseline comparison with deltas", () => {
   fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
   const result = analyzeRepo(root);
 
-  const baseline = { label: "previous", score: result.score - 10, inventoryRiskScore: result.inventoryRiskScore - 5, totals: { tokenEstimate: 100 } };
+  const baseline = { label: "previous", score: result.score - 10, inventoryScore: result.inventoryScore - 5, totals: { tokenEstimate: 100 } };
   const text = renderBaselineComparison(result, baseline, "text");
   assert.match(text, /Baseline comparison \(vs previous\)/);
   assert.match(text, /Operational score: .* \(\+10 \(better\)\)/);
 
   const markdown = renderBaselineComparison(result, baseline, "markdown");
   assert.match(markdown, /## Baseline Comparison/);
+});
+
+test("renders a legacy programmatic baseline without undefined deltas", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
+  const result = analyzeRepo(root);
+  const legacyBaseline = {
+    label: "0.5-report",
+    score: result.score - 5,
+    inventoryRiskScore: result.inventoryScore - 5,
+    totals: { tokenEstimate: 10 }
+  };
+
+  const text = renderBaselineComparison(result, legacyBaseline, "text");
+
+  assert.match(text, /Inventory score/);
+  assert.doesNotMatch(text, /undefined|NaN/);
+});
+
+test("rejects a legacy empty report as a CLI baseline", () => {
+  const root = tempRepo();
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run `npm test`.\n");
+  const baselineFile = path.join(root, "legacy-empty.json");
+  fs.writeFileSync(
+    baselineFile,
+    JSON.stringify({
+      root,
+      score: 100,
+      inventoryRiskScore: 100,
+      files: [{
+        path: "AGENTS.md",
+        kind: "agents",
+        loadScope: "always",
+        lines: 0,
+        bytes: 0,
+        tokenEstimate: 0
+      }],
+      totals: { tokenEstimate: 0 }
+    })
+  );
+
+  const run = spawnSync(
+    process.execPath,
+    [path.resolve("dist/cli.js"), root, "--baseline", baselineFile],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /has no agent context score/);
 });
 
 test("generates bench tasks from git history", () => {
@@ -397,6 +618,7 @@ test("flags references to files that do not exist", () => {
   assert.match(messages, /src\/missing\.ts/);
   assert.match(messages, /config\/app\.yaml/);
   assert.ok(!messages.includes("src/real.ts"));
+  assert.equal(result.signals.primaryRisk, "Reference to a missing path");
 });
 
 test("does not flag commands or bare directories as missing references", () => {
@@ -610,6 +832,95 @@ test("cli prints help", () => {
   assert.match(output, /--write-optimized/);
   assert.match(output, /dashboard/);
   assert.match(output, /--verify/);
+});
+
+test("--exact-tokens uses o200k_base rather than the package default encoding", () => {
+  const root = tempRepo();
+  const content = "你好，世界！这是一个测试。";
+  fs.writeFileSync(path.join(root, "AGENTS.md"), content);
+
+  const require = createRequire(import.meta.url);
+  const cl100k = require("gpt-tokenizer");
+  const o200k = require("gpt-tokenizer/encoding/o200k_base");
+  assert.notEqual(cl100k.encode(content).length, o200k.encode(content).length, "fixture must distinguish encodings");
+
+  const output = execFileSync(
+    process.execPath,
+    [path.resolve("dist/cli.js"), root, "--exact-tokens", "--format", "json"],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.files[0].tokenEstimate, o200k.encode(content).length);
+  assert.notEqual(parsed.files[0].tokenEstimate, cl100k.encode(content).length);
+});
+
+test("--exact-tokens prefers the target project's tokenizer", () => {
+  const root = tempRepo();
+  const tokenizerRoot = path.join(root, "node_modules", "gpt-tokenizer");
+  fs.mkdirSync(path.join(tokenizerRoot, "encoding"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tokenizerRoot, "package.json"),
+    JSON.stringify({
+      name: "gpt-tokenizer",
+      version: "0.0.0-test",
+      type: "commonjs",
+      exports: { "./encoding/o200k_base": "./encoding/o200k_base.cjs" }
+    })
+  );
+  fs.writeFileSync(
+    path.join(tokenizerRoot, "encoding", "o200k_base.cjs"),
+    "module.exports = { encode() { return new Array(7).fill(0); } };\n"
+  );
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "Run the target project's tokenizer.\n");
+
+  const output = execFileSync(
+    process.execPath,
+    [path.resolve("dist/cli.js"), root, "--exact-tokens", "--format", "json"],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+  const parsed = JSON.parse(output);
+
+  assert.equal(parsed.files[0].tokenEstimate, 7);
+});
+
+test("--fail-under fails clearly when context is not configured", () => {
+  const root = tempRepo();
+  const run = spawnSync(
+    process.execPath,
+    [path.resolve("dist/cli.js"), root, "--fail-under", "1"],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /Status: Not configured/);
+  assert.match(run.stderr, /score unavailable because no agent context is configured/i);
+});
+
+test("--fail-under 0 leaves an unconfigured repo non-failing", () => {
+  const root = tempRepo();
+  const run = spawnSync(
+    process.execPath,
+    [path.resolve("dist/cli.js"), root, "--fail-under", "0"],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+
+  assert.equal(run.status, 0);
+  assert.match(run.stdout, /Status: Not configured/);
+  assert.doesNotMatch(run.stderr, /fail-under:/);
+});
+
+test("--write-optimized creates a starter candidate for an unconfigured repo", () => {
+  const root = tempRepo();
+  const output = execFileSync(
+    process.execPath,
+    [path.resolve("dist/cli.js"), root, "--write-optimized", "--format", "json"],
+    { cwd: path.resolve("."), encoding: "utf8" }
+  );
+  const parsed = JSON.parse(output);
+
+  assert.equal(parsed.status, "not-configured");
+  assert.equal(parsed.optimizedPath, "AGENTS.starter.md");
+  assert.ok(fs.existsSync(path.join(root, "AGENTS.starter.md")));
 });
 
 test("bench computes gold-context metrics from workspace edits and output mentions", () => {

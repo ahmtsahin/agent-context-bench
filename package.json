@@ -1,9 +1,9 @@
 {
   "name": "agent-context-bench",
-  "version": "0.5.0",
-  "description": "Measure whether AGENTS.md, CLAUDE.md, Cursor rules, and Copilot instructions help or hurt AI coding agents.",
+  "version": "0.6.0",
+  "description": "Lint agent context files and A/B benchmark whether they help or slow down coding agents.",
   "type": "module",
-  "author": "ahmtsahin",
+  "author": "Ahmet Sahin (https://github.com/ahmtsahin)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ahmtsahin/agent-context-bench.git"
@@ -37,6 +37,7 @@
     "test": "node --test test/*.test.mjs",
     "check": "npm run build && npm test",
     "smoke": "node dist/cli.js --help",
+    "docs:dashboard": "npm run build && node scripts/generate-demo-dashboard.mjs",
     "prepublishOnly": "npm run check"
   },
   "keywords": [
@@ -46,15 +47,23 @@
     "cursor",
     "ai-coding-agents",
     "context-engineering",
-    "benchmark"
+    "benchmark",
+    "linter",
+    "coding-agent"
   ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "gpt-tokenizer": "^2.9.0",
     "typescript": "^5.7.0"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "gpt-tokenizer": "^2.9.0"
+  },
+  "peerDependenciesMeta": {
+    "gpt-tokenizer": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=20"

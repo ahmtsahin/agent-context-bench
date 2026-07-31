@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeRepo, commandAdapter, generateBenchFromGitHistory, openHistory, renderBaselineComparison, renderDashboardReports, renderReport, runBench, verifyBenchTasks, writeOptimizedAgents } from "./index.js";
+import { analyzeRepo, commandAdapter, generateBenchFromGitHistory, openHistory, renderBaselineComparison, renderDashboardReports, renderReport, runBench, verifyBenchTasks, writeAgentsCandidate } from "./index.js";
 export function main(argv = process.argv.slice(2)) {
     if (argv.includes("--help") || argv.includes("-h")) {
         console.log(helpText());
@@ -67,12 +67,12 @@ export function main(argv = process.argv.slice(2)) {
         maxBytes: args.maxBytes ?? config.maxBytes,
         maxDepth: args.maxDepth ?? config.maxDepth,
         ignoreDirs: config.ignoreDirs,
-        tokenizer: args.exactTokens ? buildExactTokenizer() : undefined
+        tokenizer: args.exactTokens ? buildExactTokenizer(root) : undefined
     });
     let optimizedPath;
     if (args.writeOptimized) {
         const output = args.writeOptimized === true ? undefined : args.writeOptimized;
-        optimizedPath = writeOptimizedAgents(result, output);
+        optimizedPath = writeAgentsCandidate(result, output);
     }
     let report = renderReport(result, format, optimizedPath);
     if (args.baseline) {
@@ -90,7 +90,11 @@ export function main(argv = process.argv.slice(2)) {
     else {
         console.log(report);
     }
-    if (typeof failUnder === "number" && result.score < failUnder) {
+    if (typeof failUnder === "number" && failUnder > 0 && result.status === "not-configured") {
+        console.error("fail-under: score unavailable because no agent context is configured.");
+        return 1;
+    }
+    if (typeof failUnder === "number" && result.score !== null && result.score < failUnder) {
         return 1;
     }
     return 0;
@@ -284,13 +288,21 @@ function loadBaseline(file) {
         throw new Error(`Baseline report not found: ${file}`);
     }
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (typeof parsed.score !== "number" || typeof parsed.inventoryRiskScore !== "number" || !parsed.totals) {
+    const legacyHasContent = Array.isArray(parsed.files)
+        ? parsed.files.some((file) => typeof file?.bytes === "number" && file.bytes > 0)
+        : true;
+    const status = parsed.status ?? (legacyHasContent ? "configured" : "not-configured");
+    if (status === "not-configured") {
+        throw new Error(`${file} has no agent context score and cannot be used as a baseline.`);
+    }
+    const inventoryScore = parsed.inventoryScore ?? parsed.inventoryRiskScore;
+    if (typeof parsed.score !== "number" || typeof inventoryScore !== "number" || !parsed.totals) {
         throw new Error(`${file} is not an agent-context-bench JSON report.`);
     }
     return {
         label: path.basename(file, ".json"),
         score: parsed.score,
-        inventoryRiskScore: parsed.inventoryRiskScore,
+        inventoryScore,
         totals: { tokenEstimate: parsed.totals.tokenEstimate }
     };
 }
@@ -304,19 +316,21 @@ function packageVersion() {
         return "0.0.0";
     }
 }
-function buildExactTokenizer() {
-    try {
-        const require = createRequire(import.meta.url);
-        const mod = require("gpt-tokenizer");
-        const encode = mod.encode ?? mod.default?.encode;
-        if (typeof encode === "function") {
-            return (text) => encode(text).length;
+function buildExactTokenizer(root) {
+    const resolvers = [createRequire(path.join(root, "package.json")), createRequire(import.meta.url)];
+    for (const require of resolvers) {
+        try {
+            const mod = require("gpt-tokenizer/encoding/o200k_base");
+            const encode = mod.encode ?? mod.default?.encode;
+            if (typeof encode === "function") {
+                return (text) => encode(text).length;
+            }
+        }
+        catch {
+            // Try the package-local resolver next.
         }
     }
-    catch {
-        // gpt-tokenizer is an optional dependency; fall through to the warning below.
-    }
-    console.error("warning: --exact-tokens needs the optional 'gpt-tokenizer' package; using the heuristic estimate instead.");
+    console.error("warning: --exact-tokens needs 'gpt-tokenizer' installed in the target project; using the heuristic estimate instead.");
     return undefined;
 }
 function parseArgs(argv) {
@@ -513,9 +527,17 @@ function isSerializableAnalysisResult(value) {
         return false;
     }
     const candidate = value;
-    return (typeof candidate.root === "string" &&
-        typeof candidate.score === "number" &&
+    const modernMetadata = (candidate.status === "configured" || candidate.status === "not-configured") &&
+        (typeof candidate.inventoryScore === "number" || candidate.inventoryScore === null) &&
+        typeof candidate.signals === "object" &&
+        typeof candidate.inventorySignals === "object";
+    const legacyMetadata = typeof candidate.score === "number" &&
         typeof candidate.inventoryRiskScore === "number" &&
+        typeof candidate.effect === "object" &&
+        typeof candidate.inventoryEffect === "object";
+    return (typeof candidate.root === "string" &&
+        (typeof candidate.score === "number" || candidate.score === null) &&
+        (modernMetadata || legacyMetadata) &&
         Array.isArray(candidate.files) &&
         Array.isArray(candidate.issues) &&
         typeof candidate.repo === "object" &&
@@ -573,13 +595,14 @@ function helpText() {
         "Options:",
         "  --format text|json|markdown|dashboard  Report format (default: text)",
         "  -o, --output <file>              Write report to a file",
-        "  --write-optimized [file]         Write a slim AGENTS.md suggestion",
-        "  --fail-under <score>             Exit 1 when score is below the threshold",
+        "  --write-optimized [file]         Write an AGENTS.md candidate for review",
+        "  --fail-under <score>             Exit 1 below a positive threshold or when",
+        "                                   not configured with a positive threshold",
         "  --max-lines <n>                  Context bloat line threshold (default: 350)",
         "  --max-bytes <n>                  Context bloat byte threshold (default: 14000)",
         "  --max-depth <n>                  Nested context file search depth (default: 6)",
         "  --baseline <file.json>           Compare scores against a previous JSON report",
-        "  --exact-tokens                   Use the optional gpt-tokenizer for exact token counts",
+        "  --exact-tokens                   Count with optional o200k_base gpt-tokenizer",
         "  --limit <n>                      Bench task limit for generate-bench/history",
         "  --verify                         generate-bench: keep only tasks whose success command",
         "                                   fails at the base commit and passes at the target commit",

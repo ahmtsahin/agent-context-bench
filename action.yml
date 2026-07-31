@@ -14,41 +14,127 @@ inputs:
     required: false
     default: "0"
   write-optimized:
-    description: Write AGENTS.optimized.md during the action run.
+    description: Write a reviewable AGENTS.optimized.md candidate during the action run.
     required: false
     default: "false"
   comment:
-    description: Post the report as a pull request comment (updates the previous one).
+    description: Post the report as a pull request comment (updates only this action's marked comment).
     required: false
     default: "false"
 outputs:
   report-file:
     description: Markdown report path.
     value: ${{ steps.run.outputs.report-file }}
+  optimized-file:
+    description: Generated AGENTS.optimized.md candidate path, or an empty string when no candidate was written.
+    value: ${{ steps.run.outputs.optimized-file }}
+  optimized-generated:
+    description: Whether a reviewable context candidate was generated.
+    value: ${{ steps.run.outputs.optimized-generated }}
 runs:
   using: composite
   steps:
     - name: Run agent context bench
       id: run
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_UNDER: ${{ inputs.fail-under }}
+        INPUT_WRITE_OPTIMIZED: ${{ inputs.write-optimized }}
       run: |
         set -euo pipefail
         report_file="agent-context-bench-report.md"
-        args=("${{ inputs.path }}" "--format" "markdown" "--fail-under" "${{ inputs.fail-under }}")
-        if [ "${{ inputs.write-optimized }}" = "true" ]; then
-          args+=("--write-optimized")
-        fi
+        optimized_file=""
+        optimized_target=""
+        optimized_generated="false"
+        args=("$INPUT_PATH" "--format" "markdown" "--fail-under" "$INPUT_FAIL_UNDER")
+
+        case "$INPUT_WRITE_OPTIMIZED" in
+          true)
+            # The CLI resolves a relative candidate path from the analyzed
+            # repository root, not from the Action checkout root.
+            optimized_target="AGENTS.optimized.md"
+            args+=("--write-optimized" "$optimized_target")
+            ;;
+          false) ;;
+          *)
+            echo "::error::write-optimized must be 'true' or 'false'."
+            exit 2
+            ;;
+        esac
+
+        set +e
         node "$GITHUB_ACTION_PATH/dist/cli.js" "${args[@]}" | tee "$report_file"
+        cli_status="${PIPESTATUS[0]}"
+        set -e
+
+        if [ -n "$optimized_target" ]; then
+          optimized_absolute="$(node --input-type=module --eval '
+            import path from "node:path";
+            process.stdout.write(path.resolve(process.env.GITHUB_WORKSPACE, process.env.INPUT_PATH, "AGENTS.optimized.md"));
+          ')"
+          if [ -s "$optimized_absolute" ]; then
+            optimized_file="$(OPTIMIZED_ABSOLUTE="$optimized_absolute" node --input-type=module --eval '
+              import path from "node:path";
+              const relative = path.relative(process.env.GITHUB_WORKSPACE, process.env.OPTIMIZED_ABSOLUTE);
+              process.stdout.write(relative.split(path.sep).join("/"));
+            ')"
+            optimized_generated="true"
+          fi
+        fi
+
         cat "$report_file" >> "$GITHUB_STEP_SUMMARY"
-        echo "report-file=$report_file" >> "$GITHUB_OUTPUT"
+        {
+          printf 'report-file=%s\n' "$report_file"
+          printf 'optimized-file=%s\n' "$optimized_file"
+          printf 'optimized-generated=%s\n' "$optimized_generated"
+        } >> "$GITHUB_OUTPUT"
+
+        exit "$cli_status"
     - name: Comment on pull request
-      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      if: ${{ always() && inputs.comment == 'true' && github.event_name == 'pull_request' && steps.run.outputs.report-file != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPORT_FILE: ${{ steps.run.outputs.report-file }}
       run: |
-        set -euo pipefail
-        number="${{ github.event.pull_request.number }}"
-        report_file="${{ steps.run.outputs.report-file }}"
-        gh pr comment "$number" --body-file "$report_file" --edit-last \
-          || gh pr comment "$number" --body-file "$report_file"
+        set -uo pipefail
+        marker='<!-- agent-context-bench-report -->'
+        comment_body="$RUNNER_TEMP/agent-context-bench-comment.md"
+
+        if [ ! -s "$REPORT_FILE" ]; then
+          echo "::warning::Agent Context Bench report was not found; skipping PR comment."
+          exit 0
+        fi
+
+        {
+          printf '%s\n\n' "$marker"
+          cat "$REPORT_FILE"
+        } > "$comment_body"
+
+        comment_id="$(
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
+            --jq 'map(.[]) | map(select(.user.login == "github-actions[bot]" and ((.body // "") | startswith("<!-- agent-context-bench-report -->")))) | first | .id // empty' \
+            2>/dev/null
+        )" || comment_id=""
+
+        if [ -n "$comment_id" ]; then
+          if gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" \
+            --field body=@"$comment_body" >/dev/null 2>&1; then
+            echo "Updated Agent Context Bench PR comment."
+            exit 0
+          fi
+        fi
+
+        if gh api --method POST \
+          "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          --field body=@"$comment_body" >/dev/null 2>&1; then
+          echo "Created Agent Context Bench PR comment."
+        else
+          echo "::warning::Could not write the PR comment. Fork pull requests commonly have a read-only GITHUB_TOKEN; the report remains available in the job summary."
+        fi
+
+        exit 0

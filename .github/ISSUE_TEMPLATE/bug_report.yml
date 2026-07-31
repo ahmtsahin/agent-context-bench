@@ -1,0 +1,67 @@
+name: Bug report
+description: Report incorrect analysis, a crash, or unexpected CLI/Action behavior.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve Agent Context Bench. Please remove secrets and private repository content from reports before attaching them.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `agent-context-bench --version` or the Action ref you use.
+      placeholder: 0.5.0 or ahmtsahin/agent-context-bench@v1
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI
+        - GitHub Action
+        - Programmatic API
+        - Benchmark runner
+        - Dashboard
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the smallest command, fixture, or public repository that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste sanitized output or a stack trace here.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system and Node.js version.
+      placeholder: Windows 11, Node.js 22.17.0
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I removed secrets and private repository content from the report.
+          required: true

@@ -1,0 +1,112 @@
+name: Promote Action major tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Existing semver release tag to promote to the floating v1 Action tag.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-action-v1
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Action release
+    if: ${{ github.repository == 'ahmtsahin/agent-context-bench' }}
+    runs-on: ubuntu-latest
+    outputs:
+      target_sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release-tag }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate release target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module --eval '
+            import packageJson from "./package.json" with { type: "json" };
+            import packageLock from "./package-lock.json" with { type: "json" };
+            const expectedTag = `v${packageJson.version}`;
+            if (!/^v\d+\.\d+\.\d+$/.test(process.env.RELEASE_TAG ?? "")) {
+              throw new Error(`Release tag must be a stable semver tag: ${process.env.RELEASE_TAG}`);
+            }
+            if (process.env.RELEASE_TAG !== expectedTag) {
+              throw new Error(`Tag ${process.env.RELEASE_TAG} does not match package version ${packageJson.version}`);
+            }
+            if (packageLock.version !== packageJson.version || packageLock.packages?.[""]?.version !== packageJson.version) {
+              throw new Error("package-lock.json version does not match package.json");
+            }
+          '
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" >/dev/null
+          package_name="$(node --print "require('./package.json').name")"
+          package_version="$(node --print "require('./package.json').version")"
+          published_version="$(npm view "$package_name@$package_version" version --silent)"
+          test "$published_version" = "$package_version"
+      - run: npm ci
+      - run: npm run check
+      - name: Verify reproducible source and record target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          worktree_status="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$worktree_status" ]; then
+            echo "::error::Verification left untracked release files."
+            printf '%s\n' "$worktree_status"
+            exit 1
+          fi
+          printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  promote:
+    name: Promote verified release to v1
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: action-major-tag
+    permissions:
+      contents: write
+    steps:
+      - name: Confirm target and move v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          VERIFIED_SHA: ${{ needs.verify.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          if [ "$current_sha" != "$VERIFIED_SHA" ]; then
+            echo "::error::$RELEASE_TAG moved after verification; refusing to update v1."
+            exit 1
+          fi
+          gh release view "$RELEASE_TAG" >/dev/null
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1" >/dev/null 2>&1; then
+            gh api --method PATCH \
+              "repos/$GITHUB_REPOSITORY/git/refs/tags/v1" \
+              --field sha="$current_sha" \
+              --field force=true >/dev/null
+          else
+            gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/git/refs" \
+              --field ref="refs/tags/v1" \
+              --field sha="$current_sha" >/dev/null
+          fi
+          echo "Promoted $RELEASE_TAG ($current_sha) to v1."
