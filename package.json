@@ -55,7 +55,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "gpt-tokenizer": "^2.9.0",
-    "typescript": "^5.7.0"
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "gpt-tokenizer": "^2.9.0"
