@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "kind": "static-context-corpus",
+  "snapshotGeneratedAt": "2026-07-31T09:11:01.126Z",
+  "disclaimer": "Static heuristic inventory only. This corpus does not measure agent task success, model quality, or causal impact.",
+  "scanner": {
+    "name": "agent-context-bench",
+    "version": "0.6.0",
+    "tokenMode": "heuristic-ceil-characters-over-4.28",
+    "command": "node dist/cli.js <pinned-checkout> --format json",
+    "publicCommand": "npx --yes agent-context-bench@0.6.0 <pinned-checkout> --format json"
+  },
+  "selection": {
+    "sampleType": "purposive convenience sample",
+    "criteria": [
+      "Public repository with a root AGENTS.md or CLAUDE.md at the pinned commit",
+      "Machine-readable open-source license plus a license file in the checkout",
+      "Small or medium checkout suitable for a read-only static scan",
+      "Mix of languages, thin and large instruction sets, and root, scoped, and deferred context"
+    ],
+    "limitations": [
+      "The sample is not random or representative of all repositories using agent context files.",
+      "Scores and issue counts are linter outputs, not observed agent outcomes.",
+      "Token values are deterministic character-based estimates, not provider billing or prompt-usage tokens.",
+      "Repository inclusion does not imply maintainer endorsement of this project or its findings."
+    ]
+  },
+  "repositories": [
+    {
+      "name": "agentsmd/agents.md",
+      "url": "https://github.com/agentsmd/agents.md",
+      "cloneUrl": "https://github.com/agentsmd/agents.md.git",
+      "commit": "d1ac7f063d20e70015ed6732664049ae4ba9d74e",
+      "license": "MIT",
+      "language": "TypeScript"
+    },
+    {
+      "name": "AfterShip/clickhouse-sql-parser",
+      "url": "https://github.com/AfterShip/clickhouse-sql-parser",
+      "cloneUrl": "https://github.com/AfterShip/clickhouse-sql-parser.git",
+      "commit": "1ca70664041ef01562302b40aa33c87d43c99ed6",
+      "license": "MIT",
+      "language": "Go"
+    },
+    {
+      "name": "breyta/breyta-cli",
+      "url": "https://github.com/breyta/breyta-cli",
+      "cloneUrl": "https://github.com/breyta/breyta-cli.git",
+      "commit": "26f448da4886d4d27b1728fd96a4f162ae42894d",
+      "license": "MIT",
+      "language": "Go"
+    },
+    {
+      "name": "grafana/oats",
+      "url": "https://github.com/grafana/oats",
+      "cloneUrl": "https://github.com/grafana/oats.git",
+      "commit": "47c18f5afb3153b5b7c5423737afbf7ecc1b6b8d",
+      "license": "Apache-2.0",
+      "language": "Go"
+    },
+    {
+      "name": "mongodb-js/zstd",
+      "url": "https://github.com/mongodb-js/zstd",
+      "cloneUrl": "https://github.com/mongodb-js/zstd.git",
+      "commit": "affeaa7aedfc4094af259a25171203ec410af121",
+      "license": "Apache-2.0",
+      "language": "JavaScript"
+    },
+    {
+      "name": "gominimal/minimal",
+      "url": "https://github.com/gominimal/minimal",
+      "cloneUrl": "https://github.com/gominimal/minimal.git",
+      "commit": "7e690dc55d15f37d02ccc74722c8a0901f1ac3b3",
+      "license": "Apache-2.0",
+      "language": "Rust"
+    },
+    {
+      "name": "makecindy/cindy",
+      "url": "https://github.com/makecindy/cindy",
+      "cloneUrl": "https://github.com/makecindy/cindy.git",
+      "commit": "cd31ce92a750c67e51d6315be6d9411a45ec7e77",
+      "license": "Apache-2.0",
+      "language": "TypeScript"
+    },
+    {
+      "name": "stackql/stackql",
+      "url": "https://github.com/stackql/stackql",
+      "cloneUrl": "https://github.com/stackql/stackql.git",
+      "commit": "c926a33a83922123b8d6217b6ca915fdb2cffffd",
+      "license": "MIT",
+      "language": "Go"
+    },
+    {
+      "name": "freee/freee-mcp",
+      "url": "https://github.com/freee/freee-mcp",
+      "cloneUrl": "https://github.com/freee/freee-mcp.git",
+      "commit": "fd70235f5d8a63bbf689dea0eff0aee3ca17dffe",
+      "license": "Apache-2.0",
+      "language": "TypeScript"
+    },
+    {
+      "name": "KyaniteHQ/linctl",
+      "url": "https://github.com/KyaniteHQ/linctl",
+      "cloneUrl": "https://github.com/KyaniteHQ/linctl.git",
+      "commit": "5dd95eaa80ee6220fd0d95303ae376c95ea5307e",
+      "license": "MIT",
+      "language": "Go"
+    },
+    {
+      "name": "pydantic/pydantic-ai-harness",
+      "url": "https://github.com/pydantic/pydantic-ai-harness",
+      "cloneUrl": "https://github.com/pydantic/pydantic-ai-harness.git",
+      "commit": "c199053ea6cc7eda2337be754a7031f753d6e316",
+      "license": "MIT",
+      "language": "Python"
+    },
+    {
+      "name": "Clawdi-AI/clawdi",
+      "url": "https://github.com/Clawdi-AI/clawdi",
+      "cloneUrl": "https://github.com/Clawdi-AI/clawdi.git",
+      "commit": "d88a25a4450478253b64e12bc972cb581812002a",
+      "license": "MIT",
+      "language": "TypeScript"
+    },
+    {
+      "name": "zuke-build/zuke",
+      "url": "https://github.com/zuke-build/zuke",
+      "cloneUrl": "https://github.com/zuke-build/zuke.git",
+      "commit": "fe84a384a427a72030a5fe6c81565c5d9d591591",
+      "license": "MIT",
+      "language": "TypeScript (Deno)"
+    },
+    {
+      "name": "dialexity/dialectical-framework",
+      "url": "https://github.com/dialexity/dialectical-framework",
+      "cloneUrl": "https://github.com/dialexity/dialectical-framework.git",
+      "commit": "c90891a277d5ac8f4effa7894f7a1c4fcdadf38c",
+      "license": "MIT",
+      "language": "Python"
+    },
+    {
+      "name": "EvolveHQ/docflow",
+      "url": "https://github.com/EvolveHQ/docflow",
+      "cloneUrl": "https://github.com/EvolveHQ/docflow.git",
+      "commit": "7ddc77476555ea6c50e5a8bf9ac632dfc63c592f",
+      "license": "MIT",
+      "language": "JavaScript"
+    }
+  ]
+}

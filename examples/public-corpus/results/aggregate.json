@@ -1,0 +1,490 @@
+{
+  "schemaVersion": 1,
+  "kind": "static-context-corpus",
+  "generatedAt": "2026-07-31T09:11:01.126Z",
+  "disclaimer": "Static heuristic inventory only. This corpus does not measure agent task success, model quality, or causal impact.",
+  "scanner": {
+    "name": "agent-context-bench",
+    "version": "0.6.0",
+    "tokenMode": "heuristic-ceil-characters-over-4.28",
+    "command": "node dist/cli.js <pinned-checkout> --format json",
+    "publicCommand": "npx --yes agent-context-bench@0.6.0 <pinned-checkout> --format json"
+  },
+  "sample": {
+    "repositories": 15,
+    "selection": "purposive convenience sample",
+    "totals": {
+      "contextFiles": 60,
+      "contextLines": 7352,
+      "tokenEstimate": 94662,
+      "issues": 118
+    }
+  },
+  "repositories": [
+    {
+      "name": "agentsmd/agents.md",
+      "url": "https://github.com/agentsmd/agents.md",
+      "commit": "d1ac7f063d20e70015ed6732664049ae4ba9d74e",
+      "license": "MIT",
+      "language": "TypeScript",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 1,
+        "lineCount": 44,
+        "byteCount": 2031,
+        "tokenEstimate": 474,
+        "scopes": {
+          "alwaysFiles": 1,
+          "scopedFiles": 0,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 94,
+        "inventory": 94
+      },
+      "issues": {
+        "total": 1,
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    {
+      "name": "AfterShip/clickhouse-sql-parser",
+      "url": "https://github.com/AfterShip/clickhouse-sql-parser",
+      "commit": "1ca70664041ef01562302b40aa33c87d43c99ed6",
+      "license": "MIT",
+      "language": "Go",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 2,
+        "lineCount": 78,
+        "byteCount": 5311,
+        "tokenEstimate": 1241,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 0,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 81,
+        "inventory": 81
+      },
+      "issues": {
+        "total": 2,
+        "errors": 1,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    {
+      "name": "breyta/breyta-cli",
+      "url": "https://github.com/breyta/breyta-cli",
+      "commit": "26f448da4886d4d27b1728fd96a4f162ae42894d",
+      "license": "MIT",
+      "language": "Go",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 1,
+        "lineCount": 33,
+        "byteCount": 1917,
+        "tokenEstimate": 448,
+        "scopes": {
+          "alwaysFiles": 1,
+          "scopedFiles": 0,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 96,
+        "inventory": 96
+      },
+      "issues": {
+        "total": 1,
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    {
+      "name": "grafana/oats",
+      "url": "https://github.com/grafana/oats",
+      "commit": "47c18f5afb3153b5b7c5423737afbf7ecc1b6b8d",
+      "license": "Apache-2.0",
+      "language": "Go",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 2,
+        "lineCount": 114,
+        "byteCount": 3412,
+        "tokenEstimate": 795,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 0,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 85,
+        "inventory": 85
+      },
+      "issues": {
+        "total": 2,
+        "errors": 0,
+        "warnings": 2,
+        "info": 0
+      }
+    },
+    {
+      "name": "mongodb-js/zstd",
+      "url": "https://github.com/mongodb-js/zstd",
+      "commit": "affeaa7aedfc4094af259a25171203ec410af121",
+      "license": "Apache-2.0",
+      "language": "JavaScript",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 2,
+        "lineCount": 43,
+        "byteCount": 2603,
+        "tokenEstimate": 600,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 0,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 96,
+        "inventory": 96
+      },
+      "issues": {
+        "total": 1,
+        "errors": 0,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    {
+      "name": "gominimal/minimal",
+      "url": "https://github.com/gominimal/minimal",
+      "commit": "7e690dc55d15f37d02ccc74722c8a0901f1ac3b3",
+      "license": "Apache-2.0",
+      "language": "Rust",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 2,
+        "lineCount": 242,
+        "byteCount": 14493,
+        "tokenEstimate": 3381,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 0,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 75,
+        "inventory": 75
+      },
+      "issues": {
+        "total": 2,
+        "errors": 1,
+        "warnings": 1,
+        "info": 0
+      }
+    },
+    {
+      "name": "makecindy/cindy",
+      "url": "https://github.com/makecindy/cindy",
+      "commit": "cd31ce92a750c67e51d6315be6d9411a45ec7e77",
+      "license": "Apache-2.0",
+      "language": "TypeScript",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 3,
+        "lineCount": 207,
+        "byteCount": 14648,
+        "tokenEstimate": 1957,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 1,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 92,
+        "inventory": 82
+      },
+      "issues": {
+        "total": 4,
+        "errors": 0,
+        "warnings": 3,
+        "info": 1
+      }
+    },
+    {
+      "name": "stackql/stackql",
+      "url": "https://github.com/stackql/stackql",
+      "commit": "c926a33a83922123b8d6217b6ca915fdb2cffffd",
+      "license": "MIT",
+      "language": "Go",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 3,
+        "lineCount": 407,
+        "byteCount": 28466,
+        "tokenEstimate": 6652,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 1,
+          "deferredFiles": 0
+        }
+      },
+      "scores": {
+        "operational": 87,
+        "inventory": 61
+      },
+      "issues": {
+        "total": 8,
+        "errors": 0,
+        "warnings": 7,
+        "info": 1
+      }
+    },
+    {
+      "name": "freee/freee-mcp",
+      "url": "https://github.com/freee/freee-mcp",
+      "commit": "fd70235f5d8a63bbf689dea0eff0aee3ca17dffe",
+      "license": "Apache-2.0",
+      "language": "TypeScript",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 3,
+        "lineCount": 355,
+        "byteCount": 20405,
+        "tokenEstimate": 3057,
+        "scopes": {
+          "alwaysFiles": 1,
+          "scopedFiles": 1,
+          "deferredFiles": 1
+        }
+      },
+      "scores": {
+        "operational": 95,
+        "inventory": 90
+      },
+      "issues": {
+        "total": 3,
+        "errors": 0,
+        "warnings": 2,
+        "info": 1
+      }
+    },
+    {
+      "name": "KyaniteHQ/linctl",
+      "url": "https://github.com/KyaniteHQ/linctl",
+      "commit": "5dd95eaa80ee6220fd0d95303ae376c95ea5307e",
+      "license": "MIT",
+      "language": "Go",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 3,
+        "lineCount": 315,
+        "byteCount": 14718,
+        "tokenEstimate": 3424,
+        "scopes": {
+          "alwaysFiles": 1,
+          "scopedFiles": 0,
+          "deferredFiles": 2
+        }
+      },
+      "scores": {
+        "operational": 91,
+        "inventory": 67
+      },
+      "issues": {
+        "total": 6,
+        "errors": 0,
+        "warnings": 6,
+        "info": 0
+      }
+    },
+    {
+      "name": "pydantic/pydantic-ai-harness",
+      "url": "https://github.com/pydantic/pydantic-ai-harness",
+      "commit": "c199053ea6cc7eda2337be754a7031f753d6e316",
+      "license": "MIT",
+      "language": "Python",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 6,
+        "lineCount": 698,
+        "byteCount": 33141,
+        "tokenEstimate": 7741,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 0,
+          "deferredFiles": 4
+        }
+      },
+      "scores": {
+        "operational": 91,
+        "inventory": 72
+      },
+      "issues": {
+        "total": 6,
+        "errors": 0,
+        "warnings": 6,
+        "info": 0
+      }
+    },
+    {
+      "name": "Clawdi-AI/clawdi",
+      "url": "https://github.com/Clawdi-AI/clawdi",
+      "commit": "d88a25a4450478253b64e12bc972cb581812002a",
+      "license": "MIT",
+      "language": "TypeScript",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 6,
+        "lineCount": 432,
+        "byteCount": 22384,
+        "tokenEstimate": 5225,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 2,
+          "deferredFiles": 2
+        }
+      },
+      "scores": {
+        "operational": 87,
+        "inventory": 66
+      },
+      "issues": {
+        "total": 7,
+        "errors": 1,
+        "warnings": 4,
+        "info": 2
+      }
+    },
+    {
+      "name": "zuke-build/zuke",
+      "url": "https://github.com/zuke-build/zuke",
+      "commit": "fe84a384a427a72030a5fe6c81565c5d9d591591",
+      "license": "MIT",
+      "language": "TypeScript (Deno)",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 6,
+        "lineCount": 1150,
+        "byteCount": 65983,
+        "tokenEstimate": 15336,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 0,
+          "deferredFiles": 4
+        }
+      },
+      "scores": {
+        "operational": 73,
+        "inventory": 32
+      },
+      "issues": {
+        "total": 10,
+        "errors": 0,
+        "warnings": 10,
+        "info": 0
+      }
+    },
+    {
+      "name": "dialexity/dialectical-framework",
+      "url": "https://github.com/dialexity/dialectical-framework",
+      "commit": "c90891a277d5ac8f4effa7894f7a1c4fcdadf38c",
+      "license": "MIT",
+      "language": "Python",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 5,
+        "lineCount": 903,
+        "byteCount": 65998,
+        "tokenEstimate": 15301,
+        "scopes": {
+          "alwaysFiles": 1,
+          "scopedFiles": 0,
+          "deferredFiles": 4
+        }
+      },
+      "scores": {
+        "operational": 17,
+        "inventory": 0
+      },
+      "issues": {
+        "total": 19,
+        "errors": 3,
+        "warnings": 16,
+        "info": 0
+      }
+    },
+    {
+      "name": "EvolveHQ/docflow",
+      "url": "https://github.com/EvolveHQ/docflow",
+      "commit": "7ddc77476555ea6c50e5a8bf9ac632dfc63c592f",
+      "license": "MIT",
+      "language": "JavaScript",
+      "scannerVersion": "0.6.0",
+      "scannerCommand": "node dist/cli.js <pinned-checkout> --format json",
+      "status": "configured",
+      "context": {
+        "fileCount": 15,
+        "lineCount": 2331,
+        "byteCount": 125428,
+        "tokenEstimate": 29030,
+        "scopes": {
+          "alwaysFiles": 2,
+          "scopedFiles": 2,
+          "deferredFiles": 11
+        }
+      },
+      "scores": {
+        "operational": 66,
+        "inventory": 0
+      },
+      "issues": {
+        "total": 46,
+        "errors": 1,
+        "warnings": 43,
+        "info": 2
+      }
+    }
+  ]
+}

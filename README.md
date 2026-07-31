@@ -2,14 +2,23 @@
 
 [![npm version](https://img.shields.io/npm/v/agent-context-bench.svg)](https://www.npmjs.com/package/agent-context-bench) [![npm downloads](https://img.shields.io/npm/dm/agent-context-bench.svg)](https://www.npmjs.com/package/agent-context-bench) [![CI](https://github.com/ahmtsahin/agent-context-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/ahmtsahin/agent-context-bench/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Find out whether your agent context helps—or slows down—your coding agent.**
+**Does your agent context help—or just add work?**
 
-`agent-context-bench` is a linter plus an A/B benchmark for `AGENTS.md`,
-`CLAUDE.md`, coding-agent `SKILL.md` files, Cursor rules, and Copilot
-instructions. The audit is local and model-free; the benchmark runs your own
-agent and test command to measure what actually happens.
+Audit `AGENTS.md`, `CLAUDE.md`, coding-agent `SKILL.md` files, Cursor rules,
+and Copilot instructions locally with no model calls. Then A/B-test `none` vs
+`current` vs `optimized` context with your own agent, tasks, and verifier.
 
-## Quick start
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/img/overview-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/img/overview-light.svg">
+    <img src="./docs/img/overview-light.svg" alt="Agent Context Bench: model-free static audit followed by a measured A/B benchmark" width="880">
+  </picture>
+</p>
+
+<p align="center"><strong>Local audit · zero model calls</strong> &nbsp;|&nbsp; <strong>Measured A/B runner</strong> &nbsp;|&nbsp; <strong>GitHub Action</strong></p>
+
+## Try it in 30 seconds
 
 Requires Node.js 20 or newer.
 
@@ -17,7 +26,7 @@ Requires Node.js 20 or newer.
 npx agent-context-bench@latest .
 ```
 
-Abbreviated output from a configured repository:
+Example audit output from a configured repository:
 
 ```text
 Status: Configured
@@ -47,13 +56,22 @@ rename it only if the repository needs agent-specific guidance.
 
 The audit is a fast linter, not a prediction of runtime outcomes. Use it on
 every change; use the benchmark when you need evidence that one context variant
-beats another.
+beats another. Static signals and measured outcomes are never presented as the
+same thing.
 
 ## What the measured case study found
 
 Two July 2026 Claude Code runs used four restored bugs and three context
 conditions. The planted bloated context produced the only result that repeated:
 it added **58–69% wall time** and **18–37% agent cost** versus no context.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/img/bench-run1-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/img/bench-run1-light.svg">
+    <img src="./docs/img/bench-run1-light.svg" alt="Two measured runs where deliberately bloated context increased wall time and spend; success remained inconclusive" width="880">
+  </picture>
+</p>
 
 | Run | No context | Bloated context | Generated candidate | Bloated time / cost vs none |
 | --- | ---: | ---: | ---: | ---: |
@@ -68,6 +86,21 @@ deltas are inconclusive; they are not marketed as a stable 75-point gain. The
 repeatable signal here is the bloat tax on time and cost, plus an edit-recall
 failure signature exposed by the gold-context metrics. Read the
 [full method, both runs, caveats, and raw-result links](docs/benchmarks/claude-sonnet-2026-07.md).
+
+## Public repository corpus
+
+A pinned July 2026 snapshot applies the static audit to **15 public
+repositories**: 60 context files, 7,352 lines, about 94,662 estimated tokens,
+and 118 heuristic findings. The median Operational Score was 87; the median
+Inventory Score was 75.
+
+This is a reproducible linter smoke corpus, **not** an agent-performance
+leaderboard or an A/B outcome study. Repositories were selected for useful
+variation, so the sample is not representative of the broader ecosystem.
+
+[Method, results, and measured-study protocol](docs/benchmarks/public-context-corpus-2026-07.md)
+· [Pinned manifest](examples/public-corpus/manifest.json)
+· [Raw aggregate](examples/public-corpus/results/aggregate.json)
 
 ## What the linter checks
 
