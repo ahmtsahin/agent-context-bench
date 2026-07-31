@@ -54,11 +54,11 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "gpt-tokenizer": "^2.9.0",
+    "gpt-tokenizer": "^3.4.0",
     "typescript": "^5.7.0"
   },
   "peerDependencies": {
-    "gpt-tokenizer": "^2.9.0"
+    "gpt-tokenizer": "^3.4.0"
   },
   "peerDependenciesMeta": {
     "gpt-tokenizer": {
