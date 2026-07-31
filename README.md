@@ -5,18 +5,18 @@
 **Does your agent context help—or just add work?**
 
 Audit `AGENTS.md`, `CLAUDE.md`, coding-agent `SKILL.md` files, Cursor rules,
-and Copilot instructions locally with no model calls. Then A/B-test `none` vs
-`current` vs `optimized` context with your own agent, tasks, and verifier.
+and Copilot instructions locally without LLM or API calls. Then A/B-test `none`
+vs `current` vs `optimized` context with your own agent, tasks, and verifier.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./docs/img/overview-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="./docs/img/overview-light.svg">
-    <img src="./docs/img/overview-light.svg" alt="Agent Context Bench: model-free static audit followed by a measured A/B benchmark" width="880">
+    <img src="./docs/img/overview-light.svg" alt="Agent Context Bench: a local static audit without LLM or API calls, followed by a benchmark that invokes your agent CLI" width="880">
   </picture>
 </p>
 
-<p align="center"><strong>Local audit · zero model calls</strong> &nbsp;|&nbsp; <strong>Measured A/B runner</strong> &nbsp;|&nbsp; <strong>GitHub Action</strong></p>
+<p align="center"><strong>Static audit · no LLM/API calls</strong> &nbsp;|&nbsp; <strong>Benchmark · invokes your agent CLI</strong> &nbsp;|&nbsp; <strong>GitHub Action</strong></p>
 
 ## Try it in 30 seconds
 
@@ -51,8 +51,8 @@ rename it only if the repository needs agent-specific guidance.
 
 | Mode | Cost | What it tells you |
 | --- | --- | --- |
-| `agent-context-bench .` | No model calls | Heuristic risk signals, token footprint, conflicts, duplication, unsafe rules, broken paths, and scope |
-| `agent-context-bench run-bench …` | Real agent runs | Observed task success, wall time, context tokens, file precision/recall, and relative efficiency |
+| `agent-context-bench .` | No LLM/API calls | Heuristic risk signals, token footprint, conflicts, duplication, unsafe rules, broken paths, and scope |
+| `agent-context-bench run-bench …` | Invokes your agent CLI | Observed task success, wall time, context tokens, file precision/recall, and relative efficiency |
 
 The audit is a fast linter, not a prediction of runtime outcomes. Use it on
 every change; use the benchmark when you need evidence that one context variant
